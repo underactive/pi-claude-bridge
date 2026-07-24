@@ -164,6 +164,20 @@ const MODE_DISALLOWED_TOOLS: Record<string, string[]> = {
 	],
 };
 
+// Read-only handshake for orchestrators that wrap this provider in a
+// read-only boundary. Pi's --tools allowlist only gates pi's own tool loop;
+// the Claude Code session behind this provider runs its own Write/Edit/Bash
+// under bypassPermissions and could mutate files regardless. When the env
+// var is set to "read", the provider path blocks the same CC tools as
+// AskClaude's "read" mode. Checked per query, not at module load:
+// orchestrators toggle the variable on the parent process around plan mode
+// and set it for spawned subagents.
+export const PROVIDER_FORCE_MODE_ENV = "PI_CLAUDE_BRIDGE_FORCE_MODE";
+
+export function providerDisallowedToolsFromEnv(env: NodeJS.ProcessEnv = process.env): string[] | undefined {
+	return env[PROVIDER_FORCE_MODE_ENV] === "read" ? MODE_DISALLOWED_TOOLS.read : undefined;
+}
+
 // --- Session persistence ---
 
 interface SessionState {
@@ -1244,11 +1258,13 @@ function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: Sim
 	// threshold with CC's, including CC's anti-thrashing guard (issue #8).
 	// Manual /compact in CC still works (we never invoke it).
 	const childEnv = { ...process.env, ENABLE_CLAUDEAI_MCP_SERVERS: "0", DISABLE_AUTO_COMPACT: "1" };
+	const forcedDisallowedTools = providerDisallowedToolsFromEnv();
 	const queryOptions: NonNullable<Parameters<typeof query>[0]["options"]> = {
 		cwd,
 		env: childEnv,
 		tools: [],
 		permissionMode: "bypassPermissions",
+		...(forcedDisallowedTools ? { disallowedTools: forcedDisallowedTools } : {}),
 		includePartialMessages: true,
 		systemPrompt: {
 			type: "preset", preset: "claude_code",
@@ -1266,7 +1282,7 @@ function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: Sim
 	debug("provider: fresh query",
 		`model=${cliModel} msgs=${context.messages.length} tools=${mcpTools.length}`,
 		`resume=${resumeSessionId?.slice(0, 8) ?? "none"} effort=${effort ?? "default"}`,
-		`appendSys=${appendSystemPrompt} strictMcp=${strictMcpConfigEnabled}`,
+		`appendSys=${appendSystemPrompt} strictMcp=${strictMcpConfigEnabled} forceReadOnly=${!!forcedDisallowedTools}`,
 		`prompt=${promptText.slice(0, 60)}${promptBlocks ? " [+images]" : ""}`);
 
 	// 3. Start SDK query and claim it for this context
