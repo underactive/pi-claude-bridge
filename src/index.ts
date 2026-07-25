@@ -1,17 +1,17 @@
 import { calculateCost, StringEnum, type AssistantMessage, type AssistantMessageEventStream, type Context, type Model, type SimpleStreamOptions, type Tool } from "@earendil-works/pi-ai";
 import * as piAi from "@earendil-works/pi-ai";
 import { getModels } from "@earendil-works/pi-ai/compat";
-import { buildSessionContext, compact, keyHint, type CompactionEntry, type ExtensionAPI, type ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import { buildSessionContext, compact, getAgentDir, keyHint, type CompactionEntry, type ExtensionAPI, type ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { createSdkMcpServer, query, type EffortLevel, type SDKMessage, type SDKUserMessage, type SettingSource } from "@anthropic-ai/claude-agent-sdk";
 import type { Base64ImageSource, ContentBlockParam, MessageParam } from "@anthropic-ai/sdk/resources";
 import { Type } from "typebox";
 import { Text } from "@earendil-works/pi-tui";
 import { createSession, deleteSession, repairToolPairing } from "cc-session-io";
-import { appendFileSync, mkdirSync, realpathSync, statSync } from "fs";
+import { appendFileSync, mkdirSync, readFileSync, realpathSync, statSync } from "fs";
 import { homedir } from "os";
 import { dirname, join } from "path";
 import { PROVIDER_ID, messageContentToText, convertPiMessages } from "./convert.js";
-import { applyLongContext, buildModels, claudeCodeModelId, type LongContextSettings, resolveModel as _resolveModel } from "./models.js";
+import { applyLongContext, buildModels, claudeCodeModelId, type LongContextSettings, mergeOverlayModels, resolveModel as _resolveModel } from "./models.js";
 import { MCP_SERVER_NAME, MCP_TOOL_PREFIX, extractSkillsBlock } from "./skills.js";
 import { verifyWrittenSession as _verifyWrittenSession } from "./session-verify.js";
 import { extractAllToolResults as _extractAllToolResults, type McpResult } from "./extract-tool-results.js";
@@ -116,8 +116,24 @@ const SDK_TO_PI_TOOL_NAME: Record<string, string> = {
 	read: "read", write: "write", edit: "edit", bash: "bash",
 };
 
-// MODELS is buildModels(getModels("anthropic")) — projection kept in models.js.
-const MODELS = buildModels(getModels("anthropic"));
+// pi surfaces newly released Claude models (e.g. claude-opus-5) through its
+// pi.dev remote-catalog overlay before pi-ai's bundled catalog carries them.
+// getModels() reads only the static catalog, so read the same overlay pi
+// persists (agentDir/models-store.json) and fill in the anthropic entries the
+// static catalog is missing. Best-effort: any read/parse failure yields [].
+function readOverlayAnthropicModels(): Array<{ id: string }> {
+	try {
+		const raw = readFileSync(join(getAgentDir(), "models-store.json"), "utf8");
+		const entry = (JSON.parse(raw) as Record<string, { models?: unknown }>)?.anthropic;
+		const models = Array.isArray(entry?.models) ? entry.models : [];
+		return models.filter((m: unknown): m is { id: string } => !!m && typeof (m as { id?: unknown }).id === "string");
+	} catch {
+		return [];
+	}
+}
+
+// MODELS is buildModels(getModels("anthropic") + overlay) — projection kept in models.js.
+const MODELS = buildModels(mergeOverlayModels<any>(getModels("anthropic"), readOverlayAnthropicModels()));
 let providerSettings: NonNullable<Config["provider"]> = {};
 let longContextSettings: LongContextSettings = { plan: "pro", longContextExtraUsage: false };
 

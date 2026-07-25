@@ -5,7 +5,7 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { MODEL_IDS_IN_ORDER, applyLongContext, buildModels, claudeCodeModelId, resolveClaudeCodeRuntimeModel, resolveModel } from "../src/models.js";
+import { MODEL_IDS_IN_ORDER, applyLongContext, buildModels, claudeCodeModelId, mergeOverlayModels, resolveClaudeCodeRuntimeModel, resolveModel } from "../src/models.js";
 
 const PRO = { plan: "pro", longContextExtraUsage: false };
 const MAX = { plan: "max", longContextExtraUsage: false };
@@ -80,6 +80,7 @@ describe("MODELS projection", () => {
 
 describe("Claude Code runtime model policy", () => {
 	it("uses measured Pro defaults", () => {
+		assert.deepEqual(resolveClaudeCodeRuntimeModel("claude-opus-5", PRO), { cliModelId: "claude-opus-5[1m]", contextWindow: 1000000 });
 		assert.deepEqual(resolveClaudeCodeRuntimeModel("claude-opus-4-8", PRO), { cliModelId: "claude-opus-4-8[1m]", contextWindow: 1000000 });
 		assert.deepEqual(resolveClaudeCodeRuntimeModel("claude-opus-4-7", PRO), { cliModelId: "claude-opus-4-7", contextWindow: 1000000 });
 		assert.deepEqual(resolveClaudeCodeRuntimeModel("claude-opus-4-6", PRO), { cliModelId: "claude-opus-4-6", contextWindow: 200000 });
@@ -162,8 +163,8 @@ describe("applyLongContext", () => {
 describe("resolveModel", () => {
 	const models = buildModels(MODEL_IDS_IN_ORDER.map(mockPiAiModel));
 
-	it("opus shortcut resolves to claude-opus-4-8 (first opus in order)", () => {
-		assert.equal(resolveModel(models, "opus")?.id, "claude-opus-4-8");
+	it("opus shortcut resolves to claude-opus-5 (first opus in order)", () => {
+		assert.equal(resolveModel(models, "opus")?.id, "claude-opus-5");
 	});
 
 	it("haiku shortcut resolves to claude-haiku-4-5", () => {
@@ -181,7 +182,33 @@ describe("resolveModel", () => {
 	it("returns the matched model object for CLI-arg conversion", () => {
 		const oneMModels = buildModels(MODEL_IDS_IN_ORDER.map(oneM));
 		const model = resolveModel(oneMModels, "opus");
-		assert.equal(model.id, "claude-opus-4-8");
-		assert.equal(claudeCodeModelId(model, PRO), "claude-opus-4-8[1m]");
+		assert.equal(model.id, "claude-opus-5");
+		assert.equal(claudeCodeModelId(model, PRO), "claude-opus-5[1m]");
+	});
+});
+
+describe("mergeOverlayModels", () => {
+	const staticCatalog = ["claude-opus-4-8", "claude-haiku-4-5"].map(mockPiAiModel);
+
+	it("adds a bridge model missing from the static catalog", () => {
+		const merged = mergeOverlayModels(staticCatalog, [mockPiAiModel("claude-opus-5")]);
+		assert.ok(find(merged, "claude-opus-5"), "opus-5 should be filled from overlay");
+		// buildModels then projects it into the picker in MODEL_IDS_IN_ORDER position.
+		assert.ok(find(buildModels(merged), "claude-opus-5"));
+	});
+
+	it("ignores overlay ids that are not bridge models", () => {
+		const merged = mergeOverlayModels(staticCatalog, [mockPiAiModel("claude-opus-4-1")]);
+		assert.equal(find(merged, "claude-opus-4-1"), undefined);
+	});
+
+	it("never overrides a static entry with the overlay copy", () => {
+		const overlayOpus48 = { ...mockPiAiModel("claude-opus-4-8"), name: "OVERLAY" };
+		const merged = mergeOverlayModels(staticCatalog, [overlayOpus48]);
+		assert.equal(find(merged, "claude-opus-4-8").name, "claude-opus-4-8");
+	});
+
+	it("returns the same array reference when nothing is added", () => {
+		assert.equal(mergeOverlayModels(staticCatalog, []), staticCatalog);
 	});
 });

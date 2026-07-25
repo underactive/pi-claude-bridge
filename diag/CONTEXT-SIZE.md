@@ -32,6 +32,8 @@ the footnote below the table).
 
 | requested id              | Pro, credits off | Pro, credits on | Max, credits off | Max, credits on |
 |---------------------------|------------------|-----------------|------------------|-----------------|
+| `claude-opus-5`           | 200K‡            | 200K             | 200K‡            | 200K‡           |
+| `claude-opus-5[1m]`      | 1M‡              | 1M              | 1M‡             | 1M‡             |
 | `claude-opus-4-8`         | 200K             | 200K            | 200K             | 200K            |
 | `claude-opus-4-8[1m]`    | 1M               | 1M              | 1M               | 1M              |
 | `claude-opus-4-7`         | 1M               | 1M              | 1M               | 1M              |
@@ -56,6 +58,12 @@ for every cell tested in both (shown for completeness).
 error-field capture; its three rejected `[1m]` rows have no recorded HTTP status
 or error text. `opus-4-6[1m]` was confirmed 429 via a separate one-off dump;
 `sonnet-4-6[1m]` and `haiku-4-5[1m]` are assumed the same by analogy.
+
+‡ **Opus 5 measured in one run only.** Directly measured 2026-07-25 in a single
+credits-on run: `claude-opus-5` bare → 200K, `claude-opus-5[1m]` → 1M (the
+`Pro, credits on` column). The other three columns are inferred by analogy to
+`opus-4-8`, whose window is unconditional across all four conditions. The bridge
+registers Opus 5 at 1M (requesting `claude-opus-5[1m]`), matching Opus 4.8.
 
 ## Error shapes
 

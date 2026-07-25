@@ -1,5 +1,9 @@
 # Changelog
 
+## UNRELEASED
+
+- **Add: claude-opus-5 model** — Anthropic's Claude Opus 5 is now selectable via `/model`, and the `opus` shortcut resolves to it. Measured Agent SDK context: bare 200K, `[1m]` 1M (same as Opus 4.8), so it registers at 1M. pi-ai's bundled catalog doesn't carry opus-5 yet, so its metadata is filled from pi's remote-catalog overlay cache (`agentDir/models-store.json`) — the same source pi's own model picker uses. It appears once pi has fetched that overlay; if the cache lacks it, the model is skipped rather than registered with wrong metadata.
+
 ## 0.6.2 — 2026-07-06
 
 - **Fix: Sonnet 5 and Fable 5 with 1M context** — bare model IDs (`claude-sonnet-5`, `claude-fable-5`) are 200K context. Must pass `[1m]` suffix for both, similar to Opus 4.8.

@@ -2,7 +2,7 @@
 // `resolveModel` returns the first partial match, so `opus` resolves to the first-listed opus entry.
 // Extracted from index.ts so tests can import without activating the extension.
 
-export const MODEL_IDS_IN_ORDER = ["claude-fable-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-5", "claude-sonnet-4-6", "claude-haiku-4-5"];
+export const MODEL_IDS_IN_ORDER = ["claude-fable-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-5", "claude-sonnet-4-6", "claude-haiku-4-5"];
 
 // Workaround for missing thinkingLevelMap in pi-ai (earendil-works/pi#6371).
 // Sonnet 5 and Sonnet 4.6 have no map, so getSupportedThinkingLevels hides
@@ -31,6 +31,17 @@ export function buildModels<T extends { id: string; [key: string]: any }>(piAiMo
 		}));
 }
 
+// Fill bridge model IDs that pi-ai's static catalog does not yet carry from an
+// overlay catalog (pi's models-store.json remote-catalog cache). A new Claude
+// model reaches pi's picker via the pi.dev remote overlay before it lands in
+// pi-ai's bundled catalog; without this, buildModels silently drops it. Only
+// missing IDs in MODEL_IDS_IN_ORDER are added — static entries always win.
+export function mergeOverlayModels<T extends { id: string }>(staticModels: T[], overlayModels: T[]): T[] {
+	const present = new Set(staticModels.map((m) => m.id));
+	const additions = overlayModels.filter((m) => MODEL_IDS_IN_ORDER.includes(m.id) && !present.has(m.id));
+	return additions.length ? [...staticModels, ...additions] : staticModels;
+}
+
 export type LongContextSettings = {
 	plan: "pro" | "max";
 	longContextExtraUsage: boolean;
@@ -49,6 +60,8 @@ const ONE_M_CONTEXT = 1_000_000;
 // not, and [1m] entitlement differs by model. See diag/CONTEXT-SIZE.md.
 export function resolveClaudeCodeRuntimeModel(modelId: string, settings: LongContextSettings): ClaudeCodeRuntimeModel {
 	switch (modelId) {
+		case "claude-opus-5":
+			return { cliModelId: "claude-opus-5[1m]", contextWindow: ONE_M_CONTEXT };
 		case "claude-opus-4-8":
 			return { cliModelId: "claude-opus-4-8[1m]", contextWindow: ONE_M_CONTEXT };
 		case "claude-opus-4-7":
