@@ -1,6 +1,6 @@
 import { calculateCost, StringEnum, type AssistantMessage, type AssistantMessageEventStream, type Context, type Model, type SimpleStreamOptions, type Tool } from "@earendil-works/pi-ai";
 import * as piAi from "@earendil-works/pi-ai";
-import { getModels } from "@earendil-works/pi-ai/compat";
+import { getModels, registerApiProvider } from "@earendil-works/pi-ai/compat";
 import { buildSessionContext, compact, getAgentDir, keyHint, type CompactionEntry, type ExtensionAPI, type ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { createSdkMcpServer, query, type EffortLevel, type SDKMessage, type SDKUserMessage, type SettingSource } from "@anthropic-ai/claude-agent-sdk";
 import type { Base64ImageSource, ContentBlockParam, MessageParam } from "@anthropic-ai/sdk/resources";
@@ -1725,6 +1725,23 @@ export default function (pi: ExtensionAPI) {
 			// Cast: pi-ai AssistantMessageEventStream diamond dep between pi-coding-agent and pi-agent-core
 			streamSimple: streamClaudeAgentSdk as any,
 		});
+
+		// pi.registerProvider only populates the coding-agent's provider composer,
+		// which dispatches through the extension's streamSimple closure. Callers
+		// that use pi-ai's global dispatch instead (completeSimple/stream, e.g.
+		// rpiv-btw) resolve via pi-ai's own api registry, which never learns about
+		// extension providers and fails with "No API provider registered for api:
+		// claude-bridge". Register there too so both dispatch paths reach the SDK.
+		// The composer already routes both stream and streamSimple through this one
+		// function, so using it for both entries matches existing behaviour.
+		registerApiProvider(
+			{
+				api: "claude-bridge",
+				stream: streamClaudeAgentSdk,
+				streamSimple: streamClaudeAgentSdk,
+			},
+			PROVIDER_ID,
+		);
 	} else {
 		// Subsequent instance (subagent session): skip registration entirely.
 		// The subagent already has access to claude-bridge models via the shared

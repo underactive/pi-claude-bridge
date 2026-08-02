@@ -2,6 +2,7 @@
 
 ## UNRELEASED
 
+- **Fix: models unusable through pi-ai's global dispatch** — the provider was registered only via `pi.registerProvider`, which populates the coding-agent's provider composer. Callers that use pi-ai's global dispatch instead (`completeSimple`/`stream`) resolve against pi-ai's own api registry, which never learns about extension providers, so claude-bridge models failed there with `No API provider registered for api: claude-bridge` — e.g. `/btw` from `@juicesharp/rpiv-btw`. The provider is now also registered with pi-ai's `registerApiProvider`, so both dispatch paths reach the Agent SDK.
 - **Add: claude-opus-5 model** — Anthropic's Claude Opus 5 is now selectable via `/model`, and the `opus` shortcut resolves to it. Measured Agent SDK context: bare 200K, `[1m]` 1M (same as Opus 4.8), so it registers at 1M. pi-ai's bundled catalog doesn't carry opus-5 yet, so its metadata is filled from pi's remote-catalog overlay cache (`agentDir/models-store.json`) — the same source pi's own model picker uses. It appears once pi has fetched that overlay; if the cache lacks it, the model is skipped rather than registered with wrong metadata.
 
 ## 0.6.2 — 2026-07-06
