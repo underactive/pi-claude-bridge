@@ -851,11 +851,15 @@ function ensureTurnStarted(c: QueryContext): void {
 
 function finalizeCurrentStream(c: QueryContext, stopReason?: string): void {
 	if (!c.currentPiStream || !c.turnOutput) return;
-	debug(`provider: finalizeCurrentStream called, stopReason=${stopReason}, turnOutput=${JSON.stringify({stopReason: c.turnOutput!.stopReason, error: c.turnOutput!.errorMessage})}`);
+	if (DEBUG) debug(`provider: finalizeCurrentStream called, stopReason=${stopReason}, turnOutput=${JSON.stringify({stopReason: c.turnOutput!.stopReason, error: c.turnOutput!.errorMessage})}`);
 	if (!c.turnStarted) ensureTurnStarted(c);
-	const reason = stopReason === "length" ? "length" : "stop";
 	const stream = c.currentPiStream;
-	stream!.push({ type: "done", reason, message: c.turnOutput });
+	if (c.turnOutput.errorMessage) {
+		stream!.push({ type: "error", reason: "error", error: c.turnOutput });
+	} else {
+		const reason = stopReason === "length" ? "length" : "stop";
+		stream!.push({ type: "done", reason, message: c.turnOutput });
+	}
 	markStreamComplete(stream);
 	stream!.end();
 	c.currentPiStream = null;
@@ -1068,6 +1072,9 @@ async function consumeQuery(
 					queryCtx.currentPiStream?.push({ type: "text_start", contentIndex: idx, partial: queryCtx.turnOutput });
 					queryCtx.currentPiStream?.push({ type: "text_delta", contentIndex: idx, delta: text, partial: queryCtx.turnOutput });
 					queryCtx.currentPiStream?.push({ type: "text_end", contentIndex: idx, content: text, partial: queryCtx.turnOutput });
+				} else if (message.subtype !== "success" && queryCtx.turnOutput) {
+					queryCtx.turnOutput.stopReason = "error";
+					queryCtx.turnOutput.errorMessage = resultErrorText(message);
 				}
 				break;
 			case "system":
@@ -1608,6 +1615,9 @@ async function promptAndWait(
 			`stopReason=${stopReason} resultSubtype=${resultSubtype ?? "none"}`,
 			`sdkMessages=${sdkMessageCount} textDeltas=${textDeltaCount} responseLen=${responseText.length}`,
 			`toolCalls=${toolCalls.size}`);
+		if (!wasAborted && resultSubtype !== "success") {
+			throw new Error(`Claude Code query failed: ${resultSubtype ?? "unknown result"}`);
+		}
 		return { responseText, stopReason };
 	} finally {
 		signal?.removeEventListener("abort", onAbort);
