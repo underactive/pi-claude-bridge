@@ -39,9 +39,10 @@ export function extractAllToolResults(
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const msg = messages[i];
 		if (msg.role === "toolResult") {
-			results.unshift({ content: toolResultToMcpContent(msg.content as string | Array<{ type: string; text?: string; data?: string; mimeType?: string }>), isError: msg.isError, toolCallId: msg.toolCallId });
+			results.push({ content: toolResultToMcpContent(msg.content as string | Array<{ type: string; text?: string; data?: string; mimeType?: string }>), isError: msg.isError, toolCallId: msg.toolCallId });
 		} else if (msg.role === "assistant") { stopIdx = i; break; }
 		// user messages: skip (steer/followUp injected mid-tool-execution)
 	}
+	results.reverse();
 	return { results, stopIdx };
 }
