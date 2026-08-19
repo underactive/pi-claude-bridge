@@ -1238,11 +1238,13 @@ function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: Sim
 	// MCP auto-loading suppression: CC reads MCP servers from ~/.claude.json (top-level
 	// + per-project) and .mcp.json. Since pi executes tools (not CC), those are pure
 	// token overhead. --strict-mcp-config tells the binary to use ONLY mcpServers passed
-	// programmatically and ignore filesystem MCP entries — applied unconditionally because
-	// settingSources=undefined does NOT give isolation (the CC default loads all sources).
-	const settingSources: SettingSource[] | undefined = appendSystemPrompt
-		? undefined
-		: providerSettings.settingSources ?? ["user", "project"];
+	// programmatically and ignore filesystem MCP entries.
+	//
+	// settingSources defaults to [] — CC's own default loads every source, which lets
+	// third-party integrations hijack model routing. A gateway integration writing
+	// CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY into ~/.claude/settings.json swaps in
+	// its own catalog, and every real Anthropic id then fails as "model not found".
+	const settingSources: SettingSource[] = providerSettings.settingSources ?? [];
 	const strictMcpConfigEnabled = providerSettings.strictMcpConfig !== false;
 	const claudeExecutable = providerSettings.pathToClaudeCodeExecutable;
 
@@ -1288,10 +1290,11 @@ function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: Sim
 		},
 		extraArgs,
 		...(effort ? { effort } : {}),
-		...(settingSources ? { settingSources } : {}),
+		settingSources,
 		...(mcpServers ? { mcpServers } : {}),
 		...(resumeSessionId ? { resume: resumeSessionId } : {}),
 		...(claudeExecutable ? { pathToClaudeCodeExecutable: claudeExecutable } : {}),
+		maxTurns: providerSettings.maxTurns ?? 50,
 		...makeCliDebugOptions("provider"),
 	};
 
@@ -1525,11 +1528,12 @@ async function promptAndWait(
 			systemPrompt: skillsBlock
 				? { type: "preset", preset: "claude_code", append: skillsBlock }
 				: undefined,
-			settingSources: ["user", "project"] as SettingSource[],
+			settingSources: (providerSettings.settingSources ?? []) as SettingSource[],
 			extraArgs,
 			...(resumeSessionId ? { resume: resumeSessionId } : {}),
 			...(options?.isolated ? { persistSession: false } : {}),
 			...(claudeExecutable ? { pathToClaudeCodeExecutable: claudeExecutable } : {}),
+			maxTurns: providerSettings.maxTurns ?? 50,
 			...makeCliDebugOptions("askclaude"),
 		},
 	});

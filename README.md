@@ -84,7 +84,7 @@ Config: `~/.pi/agent/claude-bridge.json` (global) or the project Pi config direc
 - `plan` (default `"pro"`) — set to `"max"` for Max (or Team Premium/Enterprise) to enable Opus 4.6 with 1M context.
 - `longContextExtraUsage` — set to `true` to enable 1M models that cost money through Extra Usage. It enables Sonnet 4.6 with 1M on every plan and Opus 4.6 with 1M on Pro. Not needed for Opus 4.7 or 4.8.
 - `appendSystemPrompt` — append pi's AGENTS.md and skills (default `true`)
-- `settingSources` — CC filesystem settings to load; only applied when `appendSystemPrompt: false`
+- `settingSources` — CC filesystem settings to load. Defaults to `[]`, so third-party integrations writing gateway/model-routing keys into `~/.claude/settings.json` cannot redirect bridge queries. Set to `["user", "project"]` to opt in.
 - `strictMcpConfig` — block MCP servers from `~/.claude.json` / `.mcp.json` (default `true`). Cloud MCP (Gmail/Drive via claude.ai OAuth) is always blocked.
 - `pathToClaudeCodeExecutable` — path to the `claude` binary. Useful if your OS/filesystem has the SDK's bundled musl/glibc binaries in a place where they can't run. For example, with Nix you can set the binary to e.g. `"/home/you/.nix-profile/bin/claude"`.
 

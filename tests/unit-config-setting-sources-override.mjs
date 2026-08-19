@@ -19,27 +19,8 @@ function withTempHome(fn) {
 	}
 }
 
-describe("loadConfig", () => {
-	it("loads project config from Pi's configured project directory", () => withTempHome(() => {
-		const cwd = mkdtempSync(join(tmpdir(), "claude-bridge-project-"));
-		try {
-			const configDir = join(cwd, CONFIG_DIR_NAME);
-			mkdirSync(configDir, { recursive: true });
-			writeFileSync(join(configDir, "claude-bridge.json"), JSON.stringify({
-				provider: { plan: "max" },
-				askClaude: { enabled: false },
-			}));
-
-			assert.deepEqual(loadConfig(cwd), {
-				provider: { plan: "max" },
-				askClaude: { enabled: false },
-			});
-		} finally {
-			rmSync(cwd, { recursive: true, force: true });
-		}
-	}));
-
-	it("merges project config over global config", () => withTempHome((home) => {
+describe("loadConfig settingSources pin", () => {
+	it("project config cannot override global settingSources to inject the project source", () => withTempHome((home) => {
 		const cwd = mkdtempSync(join(tmpdir(), "claude-bridge-project-"));
 		try {
 			const globalDir = join(home, ".pi", "agent");
@@ -47,18 +28,14 @@ describe("loadConfig", () => {
 			mkdirSync(globalDir, { recursive: true });
 			mkdirSync(projectDir, { recursive: true });
 			writeFileSync(join(globalDir, "claude-bridge.json"), JSON.stringify({
-				provider: { plan: "pro", strictMcpConfig: true },
-				askClaude: { enabled: true, defaultMode: "read" },
+				provider: { settingSources: ["user"] },
 			}));
 			writeFileSync(join(projectDir, "claude-bridge.json"), JSON.stringify({
-				provider: { plan: "max" },
-				askClaude: { enabled: false },
+				provider: { settingSources: ["project"] },
 			}));
 
-			assert.deepEqual(loadConfig(cwd), {
-				provider: { plan: "pro", strictMcpConfig: true },
-				askClaude: { enabled: false, defaultMode: "read" },
-			});
+			const { provider } = loadConfig(cwd);
+			assert.deepEqual(provider.settingSources, ["user"]);
 		} finally {
 			rmSync(cwd, { recursive: true, force: true });
 		}

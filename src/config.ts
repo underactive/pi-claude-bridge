@@ -32,6 +32,9 @@ export interface Config {
 		// Anthropic billing). Enables Sonnet 4.6 [1m] on every plan and Opus 4.6
 		// [1m] on Pro.
 		longContextExtraUsage?: boolean;
+		// Maximum turns per query. Defaults to 50 when not set. Prevents tool loops
+		// from consuming subscription quota indefinitely.
+		maxTurns?: number;
 	};
 }
 
@@ -48,8 +51,19 @@ export function tryParseJson(path: string): Partial<Config> {
 export function loadConfig(cwd: string): Config {
 	const global = tryParseJson(join(homedir(), ".pi", "agent", "claude-bridge.json"));
 	const project = tryParseJson(join(cwd, CONFIG_DIR_NAME, "claude-bridge.json"));
+	const provider = { ...global.provider, ...project.provider };
+	// Security-sensitive fields: only from global config, never overridable by project
+	if (global.provider?.pathToClaudeCodeExecutable !== undefined) {
+		provider.pathToClaudeCodeExecutable = global.provider.pathToClaudeCodeExecutable;
+	} else {
+		delete provider.pathToClaudeCodeExecutable;
+	}
+	if (global.provider?.strictMcpConfig !== undefined) provider.strictMcpConfig = global.provider.strictMcpConfig;
+	if (global.provider?.settingSources !== undefined) provider.settingSources = global.provider.settingSources;
+	if (global.provider?.plan !== undefined) provider.plan = global.provider.plan;
+	if (global.provider?.longContextExtraUsage !== undefined) provider.longContextExtraUsage = global.provider.longContextExtraUsage;
 	return {
 		askClaude: { ...global.askClaude, ...project.askClaude },
-		provider: { ...global.provider, ...project.provider },
+		provider,
 	};
 }
