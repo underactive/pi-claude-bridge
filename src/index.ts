@@ -231,12 +231,14 @@ function convertAndImportMessages(
 	const { anthropicMessages, sanitizedIds } = convertPiMessages(messages, customToolNameToSdk);
 
 	debug(`convertAndImportMessages: ${messages.length} pi msgs → ${anthropicMessages.length} anthropic msgs`);
-	debug(`convertAndImportMessages: imported roles:`, anthropicMessages.map((m, i) => {
-		const c = m.content;
-		if (typeof c === "string") return `[${i}]${m.role}:text`;
-		if (Array.isArray(c)) return `[${i}]${m.role}:${(c).map((b) => b.type).join("+")}`;
-		return `[${i}]${m.role}:?`;
-	}).join(" "));
+	if (DEBUG) {
+		debug(`convertAndImportMessages: imported roles:`, anthropicMessages.map((m, i) => {
+			const c = m.content;
+			if (typeof c === "string") return `[${i}]${m.role}:text`;
+			if (Array.isArray(c)) return `[${i}]${m.role}:${(c).map((b) => b.type).join("+")}`;
+			return `[${i}]${m.role}:?`;
+		}).join(" "));
+	}
 	if (sanitizedIds.size > 0) {
 		debug(`convertAndImportMessages: sanitized ${sanitizedIds.size} tool IDs:`,
 			[...sanitizedIds.entries()].map(([orig, clean]) => orig === clean ? orig : `${orig}→${clean}`).join(", "));
@@ -255,9 +257,11 @@ function convertAndImportMessages(
 function extractAllToolResults(context: Context): McpResult[] {
 	const { results, stopIdx } = _extractAllToolResults(context.messages as unknown as Array<{ role: string; [key: string]: unknown }>);
 	debug(`extractAllToolResults: ${results.length} results from ${context.messages.length} msgs, stopped at index ${stopIdx}`);
-	debug(`extractAllToolResults: all msg roles:`, context.messages.map((m, i) => `[${i}]${m.role}`).join(" "));
-	for (let r = 0; r < results.length; r++) {
-		debug(`extractAllToolResults: result[${r}] id=${results[r].toolCallId}${results[r].isError ? " ERROR" : ""} preview:`, JSON.stringify(results[r].content).slice(0, 150));
+	if (DEBUG) {
+		debug(`extractAllToolResults: all msg roles:`, context.messages.map((m, i) => `[${i}]${m.role}`).join(" "));
+		for (let r = 0; r < results.length; r++) {
+			debug(`extractAllToolResults: result[${r}] id=${results[r].toolCallId}${results[r].isError ? " ERROR" : ""} preview:`, JSON.stringify(results[r].content).slice(0, 150));
+		}
 	}
 	return results;
 }
@@ -728,6 +732,9 @@ function resolveMcpTools(context: Context, excludeToolName?: string): {
 	return { mcpTools, customToolNameToSdk, customToolNameToPi };
 }
 
+// Cache for jsonSchemaToZodShape to avoid reconverting unchanged tool schemas each turn.
+const schemaZodCache = new WeakMap<object, Record<string, unknown>>();
+
 // Creates an MCP server that bridges pi tools to the SDK. Each tool handler
 // blocks on a Promise until pi delivers the tool result via streamSimple.
 // Handlers are assigned toolCallIds from turnToolCallIds (populated when the SDK
@@ -739,7 +746,11 @@ function buildMcpServers(tools: Tool[], queryCtx: QueryContext): Record<string, 
 	const mcpTools = tools.map((tool) => ({
 		name: tool.name,
 		description: tool.description,
-		inputSchema: jsonSchemaToZodShape(tool.parameters),
+		inputSchema: schemaZodCache.get(tool.parameters as object) ?? (() => {
+			const shape = jsonSchemaToZodShape(tool.parameters);
+			schemaZodCache.set(tool.parameters as object, shape);
+			return shape;
+		})(),
 		handler: async () => {
 			const toolCallId = queryCtx.turnToolCallIds[queryCtx.nextHandlerIdx++];
 			if (!toolCallId) debug(`WARNING: mcp handler ${tool.name} has no toolCallId (idx=${queryCtx.nextHandlerIdx - 1}, available=${queryCtx.turnToolCallIds.length})`);
@@ -990,7 +1001,7 @@ function processAssistantMessage(message: SDKMessage, model: Model<any>, customT
 	if (!assistantMsg?.content) return;
 	c.turnToolCallIds = [];
 	c.nextHandlerIdx = 0;
-	debug(`processAssistantMessage fallback: ${assistantMsg.content.length} blocks, types=${assistantMsg.content.map((b: any) => b.type).join(",")}`);
+	if (DEBUG) debug(`processAssistantMessage fallback: ${assistantMsg.content.length} blocks, types=${assistantMsg.content.map((b: any) => b.type).join(",")}`);
 	for (const block of assistantMsg.content) {
 		if (block.type === "text" && block.text) {
 			ensureTurnStarted(c);
@@ -1137,7 +1148,7 @@ function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: Sim
 			if (id && resultCtx.pendingToolCalls.has(id)) {
 				const pending = resultCtx.pendingToolCalls.get(id)!;
 				resultCtx.pendingToolCalls.delete(id);
-				debug(`provider: resolving ${pending.toolName} [${id}]${result.isError ? " (error)" : ""}`, JSON.stringify(result.content).slice(0, 200));
+				if (DEBUG) debug(`provider: resolving ${pending.toolName} [${id}]${result.isError ? " (error)" : ""}`, JSON.stringify(result.content).slice(0, 200));
 				pending.resolve(result);
 			} else if (id) {
 				resultCtx.pendingResults.set(id, result);
