@@ -1520,7 +1520,9 @@ async function promptAndWait(
 
 	// Effort
 	const effort = options?.thinking && options.thinking !== "off"
-		? REASONING_TO_EFFORT[options.thinking] : undefined;
+		? ((model as any).thinkingLevelMap?.[options.thinking] as EffortLevel | undefined)
+			?? REASONING_TO_EFFORT[options.thinking]
+		: undefined;
 
 	const claudeExecutable = providerSettings.pathToClaudeCodeExecutable;
 

@@ -52,12 +52,6 @@
   A proper diagnostic channel (NDJSON or dedicated diagLog entries) would be
   cleaner and resilient to log-format churn.
 
-- **verifyWrittenSession failure paths untested**: The helper throws on
-  missing file / record-count mismatch / malformed JSONL / sessionId drift,
-  but no unit test deliberately induces each failure to confirm the error
-  messages stay useful. Low priority — the logic is simple and visual
-  inspection of the current code is enough for now.
-
 ## Deferred
 
 - **Session JSONL cleanup**: Track session IDs created during a pi session. On
