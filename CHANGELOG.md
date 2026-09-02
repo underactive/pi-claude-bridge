@@ -2,6 +2,10 @@
 
 ## UNRELEASED
 
+- **Bump: Claude Agent SDK to 0.3.258** — required for Fable 5.1 support; this bundles Claude Code 2.1.258. The direct `@anthropic-ai/sdk` dependency is also bumped to 0.93+ to satisfy the SDK peer dependency.
+
+- **Add: claude-fable-5-1 model** — Anthropic's Claude Fable 5.1 is now selectable via `/model`, and the `fable` shortcut resolves to it. It uses the same `[1m]` Agent SDK request policy as Fable 5 and registers with 1M context.
+
 - **Fix: third-party Claude Code settings could make every bridge model unusable** — the bridge loaded CC's `user`/`project` filesystem settings, so an unrelated integration writing gateway-routing keys (`CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY`, `ANTHROPIC_DEFAULT_*_MODEL`) into `~/.claude/settings.json` replaced the model catalog for bridge queries too. Every Anthropic id then failed with "issue with the selected model… may not exist or you may not have access to it", regardless of the `[1m]` suffix. `settingSources` now defaults to `[]`; set `provider.settingSources` to `["user", "project"]` to opt back in.
 
 - **Fix: models unusable through pi-ai's global dispatch** — the provider was registered only via `pi.registerProvider`, which populates the coding-agent's provider composer. Callers that use pi-ai's global dispatch instead (`completeSimple`/`stream`) resolve against pi-ai's own api registry, which never learns about extension providers, so claude-bridge models failed there with `No API provider registered for api: claude-bridge` — e.g. `/btw` from `@juicesharp/rpiv-btw`. The provider is now also registered with pi-ai's `registerApiProvider`, so both dispatch paths reach the Agent SDK.

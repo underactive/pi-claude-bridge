@@ -80,6 +80,7 @@ describe("MODELS projection", () => {
 
 describe("Claude Code runtime model policy", () => {
 	it("uses measured Pro defaults", () => {
+		assert.deepEqual(resolveClaudeCodeRuntimeModel("claude-fable-5-1", PRO), { cliModelId: "claude-fable-5-1[1m]", contextWindow: 1000000 });
 		assert.deepEqual(resolveClaudeCodeRuntimeModel("claude-opus-5", PRO), { cliModelId: "claude-opus-5[1m]", contextWindow: 1000000 });
 		assert.deepEqual(resolveClaudeCodeRuntimeModel("claude-opus-4-8", PRO), { cliModelId: "claude-opus-4-8[1m]", contextWindow: 1000000 });
 		assert.deepEqual(resolveClaudeCodeRuntimeModel("claude-opus-4-7", PRO), { cliModelId: "claude-opus-4-7", contextWindow: 1000000 });
@@ -110,6 +111,7 @@ describe("claudeCodeModelId", () => {
 	const models = buildModels(MODEL_IDS_IN_ORDER.map(oneM));
 
 	it("returns the measured SDK request id", () => {
+		assert.equal(claudeCodeModelId(find(models, "claude-fable-5-1"), PRO), "claude-fable-5-1[1m]");
 		assert.equal(claudeCodeModelId(find(models, "claude-opus-4-8"), PRO), "claude-opus-4-8[1m]");
 		assert.equal(claudeCodeModelId(find(models, "claude-opus-4-7"), PRO), "claude-opus-4-7");
 		assert.equal(claudeCodeModelId(find(models, "claude-opus-4-6"), PRO), "claude-opus-4-6");
@@ -163,8 +165,16 @@ describe("applyLongContext", () => {
 describe("resolveModel", () => {
 	const models = buildModels(MODEL_IDS_IN_ORDER.map(mockPiAiModel));
 
+	it("fable shortcut resolves to claude-fable-5-1 (latest Fable in order)", () => {
+		assert.equal(resolveModel(models, "fable")?.id, "claude-fable-5-1");
+	});
+
 	it("opus shortcut resolves to claude-opus-5 (first opus in order)", () => {
 		assert.equal(resolveModel(models, "opus")?.id, "claude-opus-5");
+	});
+
+	it("full Fable 5 ID resolves exactly despite the shared prefix", () => {
+		assert.equal(resolveModel(models, "claude-fable-5")?.id, "claude-fable-5");
 	});
 
 	it("haiku shortcut resolves to claude-haiku-4-5", () => {
@@ -190,10 +200,12 @@ describe("resolveModel", () => {
 describe("mergeOverlayModels", () => {
 	const staticCatalog = ["claude-opus-4-8", "claude-haiku-4-5"].map(mockPiAiModel);
 
-	it("adds a bridge model missing from the static catalog", () => {
-		const merged = mergeOverlayModels(staticCatalog, [mockPiAiModel("claude-opus-5")]);
+	it("adds bridge models missing from the static catalog", () => {
+		const merged = mergeOverlayModels(staticCatalog, [mockPiAiModel("claude-fable-5-1"), mockPiAiModel("claude-opus-5")]);
+		assert.ok(find(merged, "claude-fable-5-1"), "fable-5-1 should be filled from overlay");
 		assert.ok(find(merged, "claude-opus-5"), "opus-5 should be filled from overlay");
-		// buildModels then projects it into the picker in MODEL_IDS_IN_ORDER position.
+		// buildModels then projects them into MODEL_IDS_IN_ORDER positions.
+		assert.ok(find(buildModels(merged), "claude-fable-5-1"));
 		assert.ok(find(buildModels(merged), "claude-opus-5"));
 	});
 

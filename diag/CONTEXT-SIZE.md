@@ -40,6 +40,8 @@ the footnote below the table).
 | `claude-opus-4-7[1m]`    | 1M               | 1M              | 1M               | 1M              |
 | `claude-opus-4-6`         | 200K             | 200K            | 200K             | 200K            |
 | `claude-opus-4-6[1m]`    | 429              | 1M              | 1M               | 1M              |
+| `claude-fable-5-1`        | —                | —               | —                | —               |
+| `claude-fable-5-1[1m]`   | —                | —               | —                | —               |
 | `claude-fable-5`          | 200K             | —               | —                | —               |
 | `claude-fable-5[1m]`     | 1M               | —               | —                | —               |
 | `claude-sonnet-5`         | 200K             | —               | —                | —               |

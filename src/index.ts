@@ -1701,7 +1701,8 @@ export default function (pi: ExtensionAPI) {
 				event.customInstructions,
 				event.signal,
 				undefined,
-				isolatedStreamFn,
+				// Cast: pi-ai AssistantMessageEventStream diamond dep between pi-coding-agent and pi-agent-core.
+				isolatedStreamFn as unknown as Parameters<typeof compact>[7],
 				undefined,
 			);
 			debug(`session_before_compact: takeover complete summaryLen=${compaction.summary.length}`);
