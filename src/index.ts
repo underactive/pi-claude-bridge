@@ -780,12 +780,22 @@ function updateUsage(output: AssistantMessage, usage: Record<string, number | un
 	// Claude Code may report reasoning/thinking tokens separately, while pi's Usage type does not model that field.
 	const reasoning = usage.reasoning_tokens ?? usage.thinking_tokens;
 	if (reasoning != null) (output.usage as typeof output.usage & { reasoning?: number }).reasoning = reasoning;
+	// Anthropic reports the 1h/5m cache-write split separately; pi-ai's
+	// calculateCost prices the 1h subset at 2x base input. Map it when present,
+	// clamped to the total cacheWrite so the 5m remainder can't go negative.
+	const cacheCreation = (usage as any).cache_creation as { ephemeral_1h_input_tokens?: number } | null | undefined;
+	if (typeof cacheCreation?.ephemeral_1h_input_tokens === "number") {
+		(output.usage as typeof output.usage & { cacheWrite1h?: number }).cacheWrite1h =
+			Math.min(cacheCreation.ephemeral_1h_input_tokens, output.usage.cacheWrite);
+	}
 	output.usage.totalTokens = output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;
 	calculateCost(model, output.usage);
 	const promptTokens = output.usage.input + output.usage.cacheRead + output.usage.cacheWrite;
 	const cachePct = promptTokens > 0 ? Math.round(output.usage.cacheRead / promptTokens * 100) : 0;
 	const reasoningText = reasoning != null ? ` reasoning=${reasoning}` : "";
-	debug(`usage: in=${output.usage.input} out=${output.usage.output} cacheRead=${output.usage.cacheRead} cacheWrite=${output.usage.cacheWrite} total=${output.usage.totalTokens}${reasoningText} cachePct=${cachePct}% model=${model.id}`);
+	const cw1h = (output.usage as typeof output.usage & { cacheWrite1h?: number }).cacheWrite1h;
+	const cw1hText = cw1h != null ? ` cw1h=${cw1h}` : "";
+	debug(`usage: in=${output.usage.input} out=${output.usage.output} cacheRead=${output.usage.cacheRead} cacheWrite=${output.usage.cacheWrite} total=${output.usage.totalTokens}${reasoningText}${cw1hText} cachePct=${cachePct}% cost=$${output.usage.cost.total.toFixed(6)} model=${model.id}`);
 }
 
 // Log the *served* context window reported by an SDK result message
@@ -800,6 +810,24 @@ function logServedContextWindow(label: string, message: SDKMessage, model: Model
 	for (const [k, v] of Object.entries(modelUsage)) {
 		debug(`${label}: served contextWindow=${v.contextWindow ?? "?"} maxOutputTokens=${v.maxOutputTokens ?? "?"} servedModel=${k} registered=${model.contextWindow}`);
 	}
+}
+
+// Log the SDK's own cost estimate for this query() call beside the bridge's
+// running tally so list-price divergence is observable rather than assumed.
+// total_cost_usd is cumulative per query() call — read the latest result,
+// don't sum across results. costBasis 'unknown' means the SDK itself guessed;
+// treat that comparison as noise. Purely diagnostic — never feeds pi.
+function logSdkCost(label: string, message: SDKMessage, c: QueryContext): void {
+	if (!DEBUG) return;
+	const r = message as any;
+	const perModel = Object.entries((r.modelUsage ?? {}) as Record<string, any>)
+		.map(([k, v]) => `${k}=$${(v.costUSD ?? 0).toFixed(6)}/${v.costBasis ?? "?"}`)
+		.join(" ");
+	// The result arrives before the final turn's done push (finalizeCurrentStream
+	// runs after consumeQuery exits), so the in-flight turn isn't in the tally yet —
+	// add its cost for an apples-to-apples comparison.
+	const inFlight = c.turnOutput && !c.turnOutput.errorMessage ? c.turnOutput.usage.cost.total : 0;
+	debug(`${label}: sdkCost=$${(r.total_cost_usd ?? 0).toFixed(6)} bridgeEstimate=$${(c.queryCostEstimate + inFlight).toFixed(6)} ${perModel}`);
 }
 
 // --- Effort level mapping ---
@@ -869,6 +897,7 @@ function finalizeCurrentStream(c: QueryContext, stopReason?: string): void {
 		stream!.push({ type: "error", reason: "error", error: c.turnOutput });
 	} else {
 		const reason = stopReason === "length" ? "length" : "stop";
+		c.queryCostEstimate += c.turnOutput.usage.cost.total;
 		stream!.push({ type: "done", reason, message: c.turnOutput });
 	}
 	markStreamComplete(stream);
@@ -974,6 +1003,7 @@ function processStreamEvent(
 		// pi delivers the tool result via the next streamSimple call.
 		c.turnOutput.stopReason = "toolUse";
 		const stream = c.currentPiStream;
+		c.queryCostEstimate += c.turnOutput.usage.cost.total;
 		stream!.push({ type: "done", reason: "toolUse", message: c.turnOutput });
 		markStreamComplete(stream);
 		stream!.end();
@@ -1041,6 +1071,7 @@ function processAssistantMessage(message: SDKMessage, model: Model<any>, customT
 	if (c.turnSawToolCall && c.currentPiStream && c.turnOutput) {
 		c.turnOutput.stopReason = "toolUse";
 		const stream = c.currentPiStream;
+		c.queryCostEstimate += c.turnOutput.usage.cost.total;
 		stream.push({ type: "done", reason: "toolUse", message: c.turnOutput });
 		markStreamComplete(stream);
 		stream.end();
@@ -1075,6 +1106,7 @@ async function consumeQuery(
 				break;
 			case "result":
 				logServedContextWindow("result", message, model);
+				logSdkCost("result", message, queryCtx);
 				if (!queryCtx.turnSawStreamEvent && message.subtype === "success") {
 					ensureTurnStarted(queryCtx);
 					const text = message.result || "";
@@ -1326,6 +1358,10 @@ function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: Sim
 	let wasAborted = false;
 	const sdkQuery = query({ prompt, options: queryOptions });
 	queryCtx.activeQuery = sdkQuery;
+	// Each query() call has its own cumulative total_cost_usd, so the cross-check
+	// tally restarts with it. Tool-result deliveries and reentrant subagent queries
+	// are continuations within the active query and don't reset it.
+	queryCtx.queryCostEstimate = 0;
 	activeQueryContexts.add(queryCtx);
 
 	// 4. Capture context for abort handling
@@ -1403,6 +1439,7 @@ function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: Sim
 					const contOptions = { ...queryOptions, resume: resumeId, ...makeCliDebugOptions("continuation") };
 					const contQuery = query({ prompt: steerPrompt, options: contOptions });
 					queryCtx.activeQuery = contQuery;
+					queryCtx.queryCostEstimate = 0;
 
 					debug(`provider: continuation query, model=${cliModel}, resume=${resumeId.slice(0, 8)}, prompt=${steerPrompt.slice(0, 60)}`);
 

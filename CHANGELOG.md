@@ -2,6 +2,8 @@
 
 ## UNRELEASED
 
+- **Add: non-zero cost display (reverses the 0.4.0 zeroing)** — `buildModels` now forwards Anthropic API list pricing from the pi-ai catalog (and remote-catalog overlay) through the provider projection, so pi's footer and `/session` stats show an API-equivalent estimate computed from real token counts. Billing is still subscription-based; the figure is for usage-intensity comparison (see README). Rates are normalized per field, so malformed or partial catalog entries yield `0` instead of a `NaN` footer. 1h-retention cache writes (`cache_creation.ephemeral_1h_input_tokens`) are now mapped to pi's `cacheWrite1h` and priced at 2x base input like the real API. With `CLAUDE_BRIDGE_DEBUG=1`, each query's `result` logs the SDK's own `total_cost_usd` beside the bridge's running tally so divergence between list-price math and Claude Code's estimate is observable.
+
 - **Bump: Claude Agent SDK to 0.3.258** — required for Fable 5.1 support; this bundles Claude Code 2.1.258. The direct `@anthropic-ai/sdk` dependency is also bumped to 0.93+ to satisfy the SDK peer dependency.
 
 - **Add: claude-fable-5-1 model** — Anthropic's Claude Fable 5.1 is now selectable via `/model`, and the `fable` shortcut resolves to it. It uses the same `[1m]` Agent SDK request policy as Fable 5 and registers with 1M context.

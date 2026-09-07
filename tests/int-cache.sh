@@ -51,7 +51,7 @@ fi
 echo ""
 echo "Turn-by-turn cache metrics:"
 echo "---"
-printf "%-6s  %8s  %8s  %8s  %8s  %s\n" "Turn" "Input" "CacheRd" "CacheWr" "Output" "CacheHit%"
+printf "%-6s  %8s  %8s  %8s  %8s  %8s  %s\n" "Turn" "Input" "CacheRd" "CacheWr" "Output" "Cost$" "CacheHit%"
 
 # Thresholds
 MIN_CACHE_HIT_PCT=90
@@ -69,7 +69,29 @@ while IFS= read -r line; do
   CACHE_READ=$(echo "$line" | jq -r '.cacheRead')
   CACHE_WRITE=$(echo "$line" | jq -r '.cacheWrite')
   OUTPUT=$(echo "$line" | jq -r '.output')
+  COST=$(echo "$line" | jq -r '.cost.total')
   TOTAL_INPUT=$((INPUT + CACHE_READ + CACHE_WRITE))
+
+  # Cost sanity: finite, positive when tokens were consumed, no negative
+  # components, and total equals the sum of the four components.
+  COST_OK=$(echo "$line" | python3 -c '
+import json, sys, math
+u = json.load(sys.stdin)
+c = u["cost"]
+comps = [c["input"], c["output"], c["cacheRead"], c["cacheWrite"]]
+ok = all(math.isfinite(v) and v >= 0 for v in comps)
+if ok and not math.isfinite(c["total"]):
+    ok = False
+if ok and u["input"] + u["cacheRead"] + u["cacheWrite"] + u["output"] > 0 and c["total"] <= 0:
+    ok = False
+if ok and abs(c["total"] - (comps[0] + comps[1] + comps[2] + comps[3])) > 1e-9:
+    ok = False
+print("ok" if ok else "bad")
+')
+  if [ "$COST_OK" != "ok" ]; then
+    echo "  FAIL: Turn $TURN cost invalid: $COST"
+    FAIL=$((FAIL + 1))
+  fi
 
   if [ "$TOTAL_INPUT" -gt 0 ]; then
     HIT_PCT=$((CACHE_READ * 100 / TOTAL_INPUT))
@@ -77,7 +99,7 @@ while IFS= read -r line; do
     HIT_PCT=0
   fi
 
-  printf "%-6s  %8s  %8s  %8s  %8s  %s%%\n" "$TURN" "$INPUT" "$CACHE_READ" "$CACHE_WRITE" "$OUTPUT" "$HIT_PCT"
+  printf "%-6s  %8s  %8s  %8s  %8s  %8.4f  %s%%\n" "$TURN" "$INPUT" "$CACHE_READ" "$CACHE_WRITE" "$OUTPUT" "$COST" "$HIT_PCT"
 
   # Assertions
   if [ "$TURN" -ge 3 ]; then
@@ -95,7 +117,7 @@ while IFS= read -r line; do
   fi
 
   PREV_CACHE_READ=$CACHE_READ
-done < <(jq -c 'select(.type == "turn_end") | .message.usage | {input, cacheRead, cacheWrite, output}' "$LOGFILE")
+done < <(jq -c 'select(.type == "turn_end") | .message.usage | {input, cacheRead, cacheWrite, output, cost}' "$LOGFILE")
 
 echo "---"
 

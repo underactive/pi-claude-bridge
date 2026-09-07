@@ -5,6 +5,7 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { calculateCost } from "@earendil-works/pi-ai";
 import { MODEL_IDS_IN_ORDER, applyLongContext, buildModels, claudeCodeModelId, mergeOverlayModels, resolveClaudeCodeRuntimeModel, resolveModel } from "../src/models.js";
 
 const PRO = { plan: "pro", longContextExtraUsage: false };
@@ -14,7 +15,10 @@ const EXTRA = { plan: "pro", longContextExtraUsage: true };
 // Simulated pi-ai registry entry — extra fields mimic the ones pi-ai exposes
 // that must not leak into the provider-registered MODELS array.
 const mockPiAiModel = (id) => ({
-	id, name: id, reasoning: true, input: ["text"], cost: { input: 1, output: 1 },
+	id, name: id, reasoning: true, input: ["text"],
+	// Realistic Haiku-class rates ($/MTok) — calculateCost math in the
+	// "cost calculation" suite below is hand-computed against these.
+	cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
 	contextWindow: 200000, maxTokens: 8000,
 	// Leaky fields that should be stripped by the projection:
 	baseUrl: "https://api.anthropic.com", api: "anthropic", provider: "anthropic",
@@ -47,11 +51,37 @@ describe("MODELS projection", () => {
 		assert.deepEqual(models.map((m) => m.id), ["claude-haiku-4-5"]);
 	});
 
-	it("zeros out cost regardless of pi-ai pricing", () => {
+	it("forwards pi-ai list pricing", () => {
 		const models = buildModels(MODEL_IDS_IN_ORDER.map(mockPiAiModel));
 		for (const m of models) {
-			assert.deepEqual(m.cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+			assert.deepEqual(m.cost, { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 });
 		}
+	});
+
+	it("normalizes a partial cost to all four fields (calculateCost dereferences unguarded)", () => {
+		const models = buildModels([{ ...mockPiAiModel("claude-haiku-4-5"), cost: { input: 5 } }]);
+		assert.deepEqual(models[0].cost, { input: 5, output: 0, cacheRead: 0, cacheWrite: 0 });
+	});
+
+	it("normalizes a missing cost key to all four zeros", () => {
+		const { cost, ...noCost } = mockPiAiModel("claude-haiku-4-5");
+		const models = buildModels([noCost]);
+		assert.deepEqual(models[0].cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+	});
+
+	it("normalizes non-numeric and non-finite rates to 0 (malformed overlay JSON)", () => {
+		const models = buildModels([
+			{ ...mockPiAiModel("claude-haiku-4-5"), cost: { input: "3", output: NaN, cacheRead: Infinity, cacheWrite: null } },
+		]);
+		assert.deepEqual(models[0].cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+	});
+
+	it("overlay-only models keep their pricing through mergeOverlayModels", () => {
+		const staticCatalog = [mockPiAiModel("claude-haiku-4-5")];
+		const overlay = { ...mockPiAiModel("claude-opus-5"), cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 } };
+		const merged = mergeOverlayModels(staticCatalog, [overlay]);
+		const models = buildModels(merged);
+		assert.deepEqual(find(models, "claude-opus-5").cost, { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 });
 	});
 
 	it("leaves display names bare before plan-specific context is applied", () => {
@@ -75,6 +105,58 @@ describe("MODELS projection", () => {
 	it("haiku gets no default thinkingLevelMap (no effort support)", () => {
 		const models = buildModels(MODEL_IDS_IN_ORDER.map(mockPiAiModel));
 		assert.equal(find(models, "claude-haiku-4-5")?.thinkingLevelMap, undefined);
+	});
+	describe("cost calculation", () => {
+		// Real pi-ai calculateCost against a buildModels output, so the registered
+		// pricing shape is what actually feeds pi's footer math.
+		const model = buildModels(MODEL_IDS_IN_ORDER.map(mockPiAiModel))[0];
+
+		const makeUsage = () => ({
+			input: 1_000_000, output: 100_000, cacheRead: 2_000_000, cacheWrite: 10_000,
+			totalTokens: 3_110_000,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		});
+		// Hand-computed at rates { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 }:
+		// in=1M → $3, out=100K → $1.5, cacheRead=2M → $0.6, cacheWrite=10K → $0.0375
+		const EXPECTED = { input: 3, output: 1.5, cacheRead: 0.6, cacheWrite: 0.0375, total: 5.1375 };
+
+		it("computes each component and the total per-million-token", () => {
+			const usage = makeUsage();
+			calculateCost(model, usage);
+			assert.equal(usage.cost.input, EXPECTED.input);
+			assert.equal(usage.cost.output, EXPECTED.output);
+			assert.equal(usage.cost.cacheRead, EXPECTED.cacheRead);
+			assert.equal(usage.cost.cacheWrite, EXPECTED.cacheWrite);
+			assert.ok(Math.abs(usage.cost.total - EXPECTED.total) < 1e-9);
+		});
+
+		it("replaces (not accumulates) on a repeat call for the same usage object", () => {
+			const usage = makeUsage();
+			calculateCost(model, usage);
+			usage.input = 500_000;
+			usage.output = 10_000;
+			usage.cacheRead = 0;
+			usage.cacheWrite = 0;
+			calculateCost(model, usage);
+			assert.deepEqual(usage.cost, { input: 1.5, output: 0.15, cacheRead: 0, cacheWrite: 0, total: 1.65 });
+		});
+
+		it("zero usage yields zero cost", () => {
+			const usage = makeUsage();
+			usage.input = 0; usage.output = 0; usage.cacheRead = 0; usage.cacheWrite = 0; usage.totalTokens = 0;
+			calculateCost(model, usage);
+			assert.deepEqual(usage.cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 });
+		});
+
+		it("prices the 1h cache-write subset at 2x base input", () => {
+			const usage = makeUsage();
+			usage.cacheWrite1h = 4_000;
+			calculateCost(model, usage);
+			// shortWrite = 10K-4K = 6K @ 3.75 + 4K @ 2x input rate (3*2=6):
+			// (3.75*6000 + 6*4000)/1e6 = (22500 + 24000)/1e6 = 0.0465
+			assert.equal(usage.cost.cacheWrite, 0.0465);
+			assert.ok(Math.abs(usage.cost.total - (3 + 1.5 + 0.6 + 0.0465)) < 1e-9);
+		});
 	});
 });
 
@@ -159,6 +241,18 @@ describe("applyLongContext", () => {
 		const extra = applyLongContext(models, EXTRA);
 		assert.equal(find(extra, "claude-opus-4-6").name, "claude-opus-4-6 1M");
 		assert.equal(find(extra, "claude-sonnet-4-6").name, "claude-sonnet-4-6 1M");
+	});
+
+	it("leaves cost untouched on re-labeled and pass-through models", () => {
+		const registered = applyLongContext(models, PRO);
+		// Re-labeled (contextWindow/name rewritten):
+		assert.deepEqual(find(registered, "claude-opus-4-8").cost, mockPiAiModel("x").cost);
+		// Pass-through (same object reference returned): haiku already at its
+		// resolved 200K window with a bare name.
+		const base = buildModels([mockPiAiModel("claude-haiku-4-5")]);
+		const passthrough = applyLongContext(base, PRO);
+		assert.equal(passthrough[0], base[0]);
+		assert.deepEqual(passthrough[0].cost, mockPiAiModel("x").cost);
 	});
 });
 

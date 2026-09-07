@@ -36,6 +36,15 @@ describe("QueryContext class", () => {
 		assert.deepStrictEqual(ctx().turnToolCallIds, ["id1", "id2"]);
 		assert.strictEqual(ctx().nextHandlerIdx, 5);
 	});
+
+	it("queryCostEstimate starts at 0 and survives resetTurnState", () => {
+		ctx().resetTurnState(fakeModel);
+		assert.strictEqual(ctx().queryCostEstimate, 0);
+
+		ctx().queryCostEstimate += 0.0125;
+		ctx().resetTurnState(fakeModel);
+		assert.strictEqual(ctx().queryCostEstimate, 0.0125);
+	});
 });
 
 describe("context stack guards", () => {
@@ -66,6 +75,7 @@ describe("stack isolation and restore", () => {
 		assert.strictEqual(ctx().pendingToolCalls.size, 0);
 		assert.strictEqual(ctx().pendingResults.size, 0);
 		assert.strictEqual(ctx().latestCursor, 0);
+		assert.strictEqual(ctx().queryCostEstimate, 0);
 		assert.deepStrictEqual(ctx().deferredUserMessages, []);
 
 		// Mutate child

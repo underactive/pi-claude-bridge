@@ -17,18 +17,33 @@ const DEFAULT_THINKING_LEVEL_MAPS: Record<string, Record<string, string>> = {
 // Project pi-ai's model entries down to the fields pi's registerProvider expects,
 // and keep MODEL_IDS_IN_ORDER ordering. IDs missing from pi-ai are silently dropped.
 // Context-dependent display labels are applied after plan/long-context config is known.
+//
+// Cost: Anthropic API list pricing is forwarded from the catalog for display, so
+// pi's footer shows an API-equivalent figure for usage intensity. Actual billing
+// remains subscription-based. This reverses the 0.4.0 zeroing (which existed to
+// hide large cache-volume-derived numbers; cacheRead is priced at ~0.1x input, so
+// the forwarded figure is the honest API-equivalent). Per-field normalization is
+// load-bearing: pi-ai's calculateCost dereferences model.cost.input unguarded, and
+// overlay entries are parsed JSON validated only for `id`.
+const rate = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+
 export function buildModels<T extends { id: string; [key: string]: any }>(piAiModels: T[]) {
 	return MODEL_IDS_IN_ORDER
 		.map((id) => piAiModels.find((m) => m.id === id))
 		.filter((m) => m != null)
 		// Forward thinkingLevelMap so per-model overrides (e.g. opus-4-7 mapping
 		// xhigh→xhigh instead of xhigh→max) are visible to the effort lookup.
-		.map(({ id, name, reasoning, input, contextWindow, maxTokens, thinkingLevelMap }) => ({
+		.map(({ id, name, reasoning, input, contextWindow, maxTokens, thinkingLevelMap, cost }) => ({
 			id,
 			name,
 			reasoning, input, contextWindow, maxTokens,
 			thinkingLevelMap: thinkingLevelMap ?? DEFAULT_THINKING_LEVEL_MAPS[id],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			cost: {
+				input: rate(cost?.input),
+				output: rate(cost?.output),
+				cacheRead: rate(cost?.cacheRead),
+				cacheWrite: rate(cost?.cacheWrite),
+			},
 		}));
 }
 

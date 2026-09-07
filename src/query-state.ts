@@ -24,6 +24,9 @@ export class QueryContext {
 	turnToolCallIds: string[] = [];
 	nextHandlerIdx = 0;
 	deferredUserMessages: string[] = [];
+	// Running sum of finalized turn costs (usage.cost.total). Debug-only: compared
+	// against the SDK's own total_cost_usd in the result cross-check log.
+	queryCostEstimate = 0;
 
 	// Per-turn (reset together)
 	turnOutput: AssistantMessage | null = null;
