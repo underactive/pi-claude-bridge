@@ -1,4 +1,19 @@
-import { calculateCost, StringEnum, type AssistantMessage, type AssistantMessageEventStream, type Context, type Model, type SimpleStreamOptions, type Tool } from "@earendil-works/pi-ai";
+import {
+	calculateCost,
+	getCurrentSystemPrompt,
+	getCurrentTools,
+	StringEnum,
+	type AssistantMessage,
+	type AssistantMessageEventStream,
+	type ImageContent,
+	type Message,
+	type Model,
+	type SimpleStreamOptions,
+	type TextContent,
+	type Tool,
+	type TranscriptContext,
+	type UserMessage,
+} from "@earendil-works/pi-ai";
 import * as piAi from "@earendil-works/pi-ai";
 import { getModels, registerApiProvider } from "@earendil-works/pi-ai/compat";
 import { buildSessionContext, compact, getAgentDir, keyHint, type CompactionEntry, type ExtensionAPI, type ExtensionUIContext } from "@earendil-works/pi-coding-agent";
@@ -225,9 +240,9 @@ let sharedSession: SessionState | null = null;
 // two user messages in a row, or tool_result without preceding tool_use).
 function convertAndImportMessages(
 	session: ReturnType<typeof createSession>,
-	messages: Context["messages"],
+	messages: Message[],
 	customToolNameToSdk?: Map<string, string>,
-): void {
+): number {
 	const { anthropicMessages, sanitizedIds } = convertPiMessages(messages, customToolNameToSdk);
 
 	debug(`convertAndImportMessages: ${messages.length} pi msgs → ${anthropicMessages.length} anthropic msgs`);
@@ -249,12 +264,13 @@ function convertAndImportMessages(
 		debug(`convertAndImportMessages: repairToolPairing ${anthropicMessages.length} → ${repaired.length} msgs`);
 	}
 	if (repaired.length) session.importMessages(repaired);
+	return session.records.length;
 }
 
 // Pi doesn't pass tool results directly — it appends them to the context and calls
 // the provider again. Thin wrapper over extract-tool-results.js that adds per-turn
 // debug logging at the extraction boundary.
-function extractAllToolResults(context: Context): McpResult[] {
+function extractAllToolResults(context: TranscriptContext): McpResult[] {
 	const { results, stopIdx } = _extractAllToolResults(context.messages as unknown as Array<{ role: string; [key: string]: unknown }>);
 	debug(`extractAllToolResults: ${results.length} results from ${context.messages.length} msgs, stopped at index ${stopIdx}`);
 	if (DEBUG) {
@@ -266,46 +282,63 @@ function extractAllToolResults(context: Context): McpResult[] {
 	return results;
 }
 
-/** Extract the last user message from context as a prompt string. Returns null if last message is not a user message. */
-function extractUserPrompt(messages: Context["messages"]): string | null {
-	const last = messages[messages.length - 1];
-	if (!last || last.role !== "user") return null;
-	if (typeof last.content === "string") return last.content;
-	return messageContentToText(last.content) || "";
+/** Number of conversational records in a transcript. System prompt/tool-state
+ *  records are provider metadata and never belong in Claude Code's JSONL. */
+function conversationMessageCount(messages: readonly Message[]): number {
+	let count = 0;
+	for (const message of messages) {
+		if (message.role !== "system") count++;
+	}
+	return count;
 }
 
-/** Extract the last user message as ContentBlockParam[] (preserving images).
+/** Index of the first message in the current user turn. */
+function turnStart(messages: readonly Message[]): number {
+	let i = messages.length;
+	while (i > 0 && messages[i - 1].role === "user") i--;
+	return i;
+}
+
+/** Extract the current user turn as a prompt string. Returns null if the last message is not a user message. */
+function extractUserPrompt(messages: Message[]): string | null {
+	const turn = messages.slice(turnStart(messages)) as UserMessage[];
+	if (turn.length === 0) return null;
+	return turn
+		.map((message) => typeof message.content === "string" ? message.content : messageContentToText(message.content))
+		.filter((text) => text)
+		.join("\n");
+}
+
+/** Extract the current user turn as ContentBlockParam[] (preserving images).
  *  Returns null if no images — caller should fall back to string prompt. */
-function extractUserPromptBlocks(messages: Context["messages"]): ContentBlockParam[] | null {
-	const last = messages[messages.length - 1];
-	if (!last || last.role !== "user") return null;
-	if (typeof last.content === "string") {
-		debug(`extractUserPromptBlocks: content is string (length=${last.content.length})`);
-		return null;
-	}
-	if (!Array.isArray(last.content)) {
-		debug(`extractUserPromptBlocks: content is ${typeof last.content}`);
-		return null;
-	}
-	debug(`extractUserPromptBlocks: ${last.content.length} blocks, types=${last.content.map((b: any) => b.type).join(",")}`);
+function extractUserPromptBlocks(messages: Message[]): ContentBlockParam[] | null {
+	const turn = messages.slice(turnStart(messages)) as UserMessage[];
+	if (turn.length === 0) return null;
+
 	let hasImage = false;
 	const blocks: ContentBlockParam[] = [];
-	for (const block of last.content) {
-		if (block.type === "text" && block.text) {
-			blocks.push({ type: "text", text: block.text });
-		} else if (block.type === "image") {
-			debug(`image block: mimeType=${(block as any).mimeType}, data length=${((block as any).data ?? "").length}, keys=${Object.keys(block).join(",")}`);
-			if (!(block as any).data || !(block as any).mimeType) {
-				debug(`image block missing data or mimeType, skipping`);
-				continue;
+	for (const message of turn) {
+		const content: (TextContent | ImageContent)[] = typeof message.content === "string"
+			? [{ type: "text", text: message.content }]
+			: message.content;
+		for (const block of content) {
+			if (block.type === "text" && block.text) {
+				blocks.push({ type: "text", text: block.text });
+			} else if (block.type === "image") {
+				if (!block.data || !block.mimeType) {
+					debug(`image block missing data or mimeType, skipping: keys=${Object.keys(block).join(",")}`);
+					continue;
+				}
+				debug(`image block: mimeType=${block.mimeType}, data length=${block.data.length}`);
+				hasImage = true;
+				blocks.push({
+					type: "image",
+					source: { type: "base64", media_type: block.mimeType as Base64ImageSource["media_type"], data: block.data },
+				});
 			}
-			hasImage = true;
-			blocks.push({
-				type: "image",
-				source: { type: "base64", media_type: block.mimeType as Base64ImageSource["media_type"], data: block.data },
-			});
 		}
 	}
+	debug(`extractUserPromptBlocks: ${turn.length} msgs in turn, ${blocks.length} blocks, types=${blocks.map((block) => block.type).join(",")}`);
 	return hasImage ? blocks : null;
 }
 
@@ -332,11 +365,12 @@ function newAssistantOutput(model: Model<any>, text: string, stopReason: Assista
 	};
 }
 
-function extractIsolatedSummaryPrompt(messages: Context["messages"]): string {
-	if (messages.length !== 1 || messages[0].role !== "user") {
+function extractIsolatedSummaryPrompt(messages: Message[]): string {
+	const conversationalMessages = messages.filter((message) => message.role !== "system");
+	if (conversationalMessages.length !== 1 || conversationalMessages[0].role !== "user") {
 		throw new Error(
-			`isolatedStreamFn: expected exactly 1 user message, got ${messages.length} ` +
-			`(${messages.map((m) => m.role).join(",")})`,
+			`isolatedStreamFn: expected exactly 1 user message, got ${conversationalMessages.length} ` +
+			`(${conversationalMessages.map((message) => message.role).join(",")})`,
 		);
 	}
 	const promptText = extractUserPrompt(messages);
@@ -351,7 +385,7 @@ function resultErrorText(message: SDKMessage): string {
 	return `Claude Code summary failed: ${result.subtype ?? "unknown result"}`;
 }
 
-function isolatedStreamFn(model: Model<any>, context: Context, options?: SimpleStreamOptions): AssistantMessageEventStream {
+function isolatedStreamFn(model: Model<any>, context: TranscriptContext, options?: SimpleStreamOptions): AssistantMessageEventStream {
 	const stream = newAssistantMessageEventStream();
 	void runIsolatedSummary(model, context, options, stream);
 	return stream;
@@ -359,7 +393,7 @@ function isolatedStreamFn(model: Model<any>, context: Context, options?: SimpleS
 
 async function runIsolatedSummary(
 	model: Model<any>,
-	context: Context,
+	context: TranscriptContext,
 	options: SimpleStreamOptions | undefined,
 	stream: AssistantMessageEventStream,
 ): Promise<void> {
@@ -388,7 +422,7 @@ async function runIsolatedSummary(
 				settingSources: [] as SettingSource[],
 				skills: [],
 				persistSession: false,
-				systemPrompt: context.systemPrompt,
+				systemPrompt: getCurrentSystemPrompt(context.messages),
 				model: cliModel,
 				maxTurns: 1,
 				...(claudeExecutable ? { pathToClaudeCodeExecutable: claudeExecutable } : {}),
@@ -487,7 +521,7 @@ function verifyWrittenSession(
 	expectedSessionId: string,
 	expectedRecordCount: number,
 	cwd: string,
-): void {
+): boolean {
 	const warnings = _verifyWrittenSession(jsonlPath, expectedSessionId, expectedRecordCount);
 	for (const msg of warnings) {
 		debug(`WARNING session verify: ${msg}`);
@@ -500,6 +534,7 @@ function verifyWrittenSession(
 		);
 		diagDump("session_verify_fail", { msg, jsonlPath, cwd, realpath: safeRealpath(cwd), claudeConfigDir: process.env.CLAUDE_CONFIG_DIR ?? null });
 	}
+	return warnings.length === 0;
 }
 
 function safeRealpath(p: string): string {
@@ -551,12 +586,13 @@ function debugSessionPaths(label: string, cwd: string, jsonlPath: string): void 
 // Log strings still say "Case 1/2/3/4" so existing diagnostics (int-cache.sh,
 // int-session-resume.mjs) keep grepping the same anchors.
 function syncSharedSession(
-	messages: Context["messages"],
+	messages: Message[],
 	cwd: string,
 	customToolNameToSdk?: Map<string, string>,
 	modelId?: string,
 ): SyncResult {
-	const priorMessages = messages.slice(0, -1); // everything before the new user prompt
+	const conversationalMessages = messages.filter((message) => message.role !== "system");
+	const priorMessages = conversationalMessages.slice(0, turnStart(conversationalMessages));
 
 	// REUSE path
 	//
@@ -590,7 +626,7 @@ function syncSharedSession(
 
 	// REBUILD path
 	if (priorMessages.length === 0) {
-		debug(`Case 1: clean start, ${messages.length} total messages`);
+		debug(`Case 1: clean start, ${conversationalMessages.length} conversational messages (${messages.length} transcript records)`);
 		debug(`syncResult: path=clean-start`);
 		return { sessionId: null };
 	}
@@ -601,27 +637,43 @@ function syncSharedSession(
 	// and for any tools that key off them. Skipped only when there's a
 	// concurrent writer we shouldn't race — see forceRotate docs above.
 	const preserveId = previousSessionId !== undefined && !sharedSession?.forceRotate;
-	if (preserveId) {
-		// Wipe prior jsonl + companion dir (no-op if nothing to wipe).
-		deleteSession(previousSessionId!, cwd, process.env.CLAUDE_CONFIG_DIR);
-	}
 	const session = createSession({
 		projectPath: cwd,
 		claudeDir: process.env.CLAUDE_CONFIG_DIR,
 		...(preserveId ? { sessionId: previousSessionId } : {}),
 		...(modelId ? { model: modelId } : {}),
 	});
-	convertAndImportMessages(session, priorMessages, customToolNameToSdk);
+	const importedRecordCount = convertAndImportMessages(session, priorMessages, customToolNameToSdk);
+	if (importedRecordCount === 0) {
+		debug(`WARNING: ${priorMessages.length} prior messages produced no Claude session records; starting clean`);
+		diagDump("empty_session_conversion", {
+			cwd,
+			priorMessageCount: priorMessages.length,
+			messageRoles: priorMessages.map((message, index) => `[${index}]${message.role}`).join(" "),
+		});
+		piUI?.notify("Claude bridge could not convert prior history; starting a clean Claude session.", "warning");
+		sharedSession = null;
+		debug("syncResult: path=clean-start reason=empty-conversion");
+		return { sessionId: null };
+	}
+	if (preserveId) {
+		// Build the replacement in memory before deleting the prior JSONL.
+		deleteSession(previousSessionId!, cwd, process.env.CLAUDE_CONFIG_DIR);
+	}
 	session.save();
-	verifyWrittenSession(session.jsonlPath, session.sessionId, session.messages.length, cwd);
+	if (!verifyWrittenSession(session.jsonlPath, session.sessionId, session.records.length, cwd)) {
+		sharedSession = null;
+		debug("syncResult: path=clean-start reason=session-verify-failed");
+		return { sessionId: null };
+	}
 	sharedSession = { sessionId: session.sessionId, cursor: priorMessages.length, cwd };
 	if (previousSessionId === undefined) {
-		debug(`Case 2: first turn with ${priorMessages.length} prior messages → session ${session.sessionId.slice(0, 8)}, ${session.messages.length} records`);
+		debug(`Case 2: first turn with ${priorMessages.length} prior messages → session ${session.sessionId.slice(0, 8)}, ${session.records.length} records`);
 	} else if (preserveId) {
 		const missedCount = priorMessages.length - previousCursor;
-		debug(`Case 4: ${missedCount} missed messages, ${priorMessages.length} total → rewrote session ${session.sessionId.slice(0, 8)} (same id), ${session.messages.length} records`);
+		debug(`Case 4: ${missedCount} missed messages, ${priorMessages.length} total → rewrote session ${session.sessionId.slice(0, 8)} (same id), ${session.records.length} records`);
 	} else {
-		debug(`Case 4 post-abort: ${priorMessages.length} total → new session ${session.sessionId.slice(0, 8)} (was ${previousSessionId.slice(0, 8)}, rotated to avoid race with orphan writer), ${session.messages.length} records`);
+		debug(`Case 4 post-abort: ${priorMessages.length} total → new session ${session.sessionId.slice(0, 8)} (was ${previousSessionId.slice(0, 8)}, rotated to avoid race with orphan writer), ${session.records.length} records`);
 	}
 	debugSessionPaths(`${session.sessionId.slice(0, 8)}`, cwd, session.jsonlPath);
 	debug(`syncResult: path=rebuild sessionId=${session.sessionId} priors=${priorMessages.length} ${previousSessionId === undefined ? "first" : preserveId ? "preserved" : "rotated-post-abort"}`);
@@ -708,7 +760,7 @@ function contextForToolResults(results: McpResult[]): QueryContext | undefined {
 	return undefined;
 }
 
-function resolveMcpTools(context: Context, excludeToolName?: string): {
+function resolveMcpTools(tools: Tool[], excludeToolName?: string): {
 	mcpTools: Tool[];
 	customToolNameToSdk: Map<string, string>;
 	customToolNameToPi: Map<string, string>;
@@ -717,9 +769,9 @@ function resolveMcpTools(context: Context, excludeToolName?: string): {
 	const customToolNameToSdk = new Map<string, string>();
 	const customToolNameToPi = new Map<string, string>();
 
-	if (!context.tools) return { mcpTools, customToolNameToSdk, customToolNameToPi };
+	if (!tools.length) return { mcpTools, customToolNameToSdk, customToolNameToPi };
 
-	for (const tool of context.tools) {
+	for (const tool of tools) {
 		if (tool.name === excludeToolName) continue;
 		const sdkName = `${MCP_TOOL_PREFIX}${tool.name}`;
 		mcpTools.push(tool);
@@ -1010,7 +1062,7 @@ function processStreamEvent(
 		c.currentPiStream = null;
 
 		// Cursor is updated by the next streamSimple call (tool result delivery path)
-		// which sets cursor = context.messages.length with the post-tool-result context.
+		// which records the post-tool-result conversational message count.
 		return;
 	}
 
@@ -1152,11 +1204,12 @@ async function consumeQuery(
 
 /** Provider entry point. Pi calls this for each new prompt and each tool result.
  *  Two cases: tool result delivery (active query) or fresh query. */
-function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: SimpleStreamOptions): AssistantMessageEventStream {
+function streamClaudeAgentSdk(model: Model<any>, context: TranscriptContext, options?: SimpleStreamOptions): AssistantMessageEventStream {
 	const stream = newAssistantMessageEventStream();
 
 	// DEBUG: trace followUp message triggering
 	const lastMsgRole = context.messages[context.messages.length - 1]?.role;
+	const conversationCount = conversationMessageCount(context.messages);
 	debug(`provider: streamClaudeAgentSdk called, activeQuery=${!!ctx().activeQuery}, lastMsgRole=${lastMsgRole}, isReentrant=${ctx().activeQuery !== null}`);
 
 	const activeQuery = ctx().activeQuery !== null;
@@ -1213,8 +1266,8 @@ function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: Sim
 			}
 		}
 
-		if (sharedSession) sharedSession.cursor = context.messages.length;
-		resultCtx.latestCursor = Math.max(resultCtx.latestCursor, context.messages.length);
+		if (sharedSession) sharedSession.cursor = conversationCount;
+		resultCtx.latestCursor = Math.max(resultCtx.latestCursor, conversationCount);
 		return stream;
 	}
 
@@ -1224,7 +1277,7 @@ function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: Sim
 	const lastMsg = context.messages[context.messages.length - 1];
 	if (lastMsg?.role === "toolResult") {
 		debug(`provider: orphaned tool result after abort, emitting end_turn`);
-		if (sharedSession) sharedSession.cursor = context.messages.length;
+		if (sharedSession) sharedSession.cursor = conversationCount;
 		const c = ctx();  // capture current context for the microtask
 		queueMicrotask(() => {
 			c.resetTurnState(model);
@@ -1252,7 +1305,9 @@ function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: Sim
 	queryCtx.resetTurnState(model);
 	queryCtx.latestCursor = 0;
 
-	const { mcpTools, customToolNameToSdk, customToolNameToPi } = resolveMcpTools(context, askClaudeToolName);
+	const currentTools = getCurrentTools(context.messages);
+	const systemPrompt = getCurrentSystemPrompt(context.messages);
+	const { mcpTools, customToolNameToSdk, customToolNameToPi } = resolveMcpTools(currentTools, askClaudeToolName);
 	const cwd = (options as { cwd?: string } | undefined)?.cwd ?? process.cwd();
 	const syncResult = syncSharedSession(context.messages, cwd, customToolNameToSdk, model.id);
 	const { sessionId: resumeSessionId } = syncResult;
@@ -1281,7 +1336,7 @@ function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: Sim
 	const mcpServers = buildMcpServers(mcpTools, queryCtx);
 	const appendSystemPrompt = providerSettings.appendSystemPrompt !== false;
 	const agentsAppend = appendSystemPrompt ? extractAgentsAppend() : undefined;
-	const skillsAppend = appendSystemPrompt ? extractSkillsBlock(context.systemPrompt) : undefined;
+	const skillsAppend = appendSystemPrompt ? extractSkillsBlock(systemPrompt) : undefined;
 	const appendParts = [agentsAppend, skillsAppend].filter((part): part is string => Boolean(part));
 	const systemPromptAppend = appendParts.length > 0 ? appendParts.join("\n\n") : undefined;
 
@@ -1418,7 +1473,7 @@ function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: Sim
 				}
 				debug(`provider: query done, ignoring captured session ${capturedSessionId?.slice(0, 8) ?? "none"} to preserve shared session`);
 			} else if (sessionId) {
-				const cursor = Math.max(context.messages.length, queryCtx.latestCursor, sharedSession?.cursor ?? 0);
+				const cursor = Math.max(conversationCount, queryCtx.latestCursor, sharedSession?.cursor ?? 0);
 				debug(`provider: query done, session=${sessionId.slice(0, 8)}, cursor=${cursor}`);
 				sharedSession = { sessionId, cursor, cwd };
 			}
@@ -1521,7 +1576,7 @@ async function promptAndWait(
 		model?: string;
 		thinking?: string;
 		isolated?: boolean;
-		context?: Context["messages"];
+		context?: Message[];
 	},
 ): Promise<{ responseText: string; stopReason: string }> {
 	const cwd = process.cwd();
@@ -1543,7 +1598,7 @@ async function promptAndWait(
 		} else {
 			// No provider session yet — create one from pi's context
 			const contextWithPrompt = [...options.context, { role: "user" as const, content: prompt, timestamp: Date.now() }];
-			const sync = syncSharedSession(contextWithPrompt as Context["messages"], cwd, undefined, modelId);
+			const sync = syncSharedSession(contextWithPrompt as Message[], cwd, undefined, modelId);
 			resumeSessionId = sync.sessionId;
 		}
 	}
@@ -1917,7 +1972,7 @@ export default function (pi: ExtensionAPI) {
 						model: params.model,
 						thinking: params.thinking,
 						isolated,
-						context: isolated ? undefined : buildSessionContext(ctx.sessionManager.getBranch()).messages as Context["messages"],
+						context: isolated ? undefined : buildSessionContext(ctx.sessionManager.getBranch()).messages as Message[],
 					});
 					clearInterval(progressInterval);
 					onUpdate?.({ content: [{ type: "text", text: "" }], details: {} });

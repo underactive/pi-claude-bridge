@@ -57,9 +57,16 @@ describe("verifyWrittenSession", () => {
 		assert.deepEqual(verifyWrittenSession(path, SID, 3), []);
 	});
 
-	it("warns when file is missing", () => {
+	it("diagnoses an empty conversion before checking for a file", () => {
 		const missing = join(dir, "nope.jsonl");
 		const warnings = verifyWrittenSession(missing, SID, 0);
+		assert.equal(warnings.length, 1);
+		assert.match(warnings[0], /no records produced by conversion/);
+	});
+
+	it("warns when a non-empty session file is missing", () => {
+		const missing = join(dir, "still-nope.jsonl");
+		const warnings = verifyWrittenSession(missing, SID, 1);
 		assert.equal(warnings.length, 1);
 		assert.match(warnings[0], /file missing/);
 	});

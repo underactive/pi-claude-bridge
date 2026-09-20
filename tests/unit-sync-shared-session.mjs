@@ -21,6 +21,30 @@ describe("syncSharedSession", () => {
 		__test.resetSharedSession();
 	});
 
+	it("treats Pi 0.86 transcript system messages as metadata, not resumable history", () => {
+		const cwd = mkdtempSync(join(tmpdir(), "sync-shared-session-"));
+		try {
+			const result = __test.syncSharedSession([
+				{
+					role: "system",
+					content: "system prompt",
+					toolsAdded: [],
+					timestamp: Date.now(),
+				},
+				{
+					role: "user",
+					content: "First turn",
+					timestamp: Date.now(),
+				},
+			], cwd);
+
+			assert.equal(result.sessionId, null, "a first turn must start clean instead of resuming a phantom session");
+			assert.equal(__test.getSharedSession(), null, "system metadata must not create shared session state");
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
 	it("does not reuse a cached main session for a shorter synthetic compact context", () => {
 		const cwd = mkdtempSync(join(tmpdir(), "sync-shared-session-"));
 		try {

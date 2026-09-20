@@ -6,6 +6,10 @@ import { statSync, readFileSync } from "fs";
 
 export function verifyWrittenSession(jsonlPath: string, expectedSessionId: string, expectedRecordCount: number): string[] {
 	const warnings = [];
+	if (expectedRecordCount === 0) {
+		warnings.push(`no records produced by conversion — session was not written path=${jsonlPath}`);
+		return warnings;
+	}
 	let st;
 	try {
 		st = statSync(jsonlPath);
