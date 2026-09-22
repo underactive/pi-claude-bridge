@@ -2,6 +2,8 @@
 
 ## UNRELEASED
 
+- **Fix: AGENTS.md discovery follows request cwd** — `resolveAgentsMdPath` and `extractAgentsAppend` walk from the dispatch `cwd` instead of the bridge owner's `process.cwd()`, so adopted bridge sessions pick up the requesting project's AGENTS.md.
+
 - **Fix: Pi 0.86 normalized transcript compatibility** — provider streams now read the system prompt and tool declarations from transcript system messages, exclude those metadata records from Claude Code session history and cursor accounting, and start clean instead of resuming a nonexistent session when conversion produces no records. Pi peer and development dependencies now require 0.86+.
 
 - **Add: non-zero cost display (reverses the 0.4.0 zeroing)** — `buildModels` now forwards Anthropic API list pricing from the pi-ai catalog (and remote-catalog overlay) through the provider projection, so pi's footer and `/session` stats show an API-equivalent estimate computed from real token counts. Billing is still subscription-based; the figure is for usage-intensity comparison (see README). Rates are normalized per field, so malformed or partial catalog entries yield `0` instead of a `NaN` footer. 1h-retention cache writes (`cache_creation.ephemeral_1h_input_tokens`) are now mapped to pi's `cacheWrite1h` and priced at 2x base input like the real API. With `CLAUDE_BRIDGE_DEBUG=1`, each query's `result` logs the SDK's own `total_cost_usd` beside the bridge's running tally so divergence between list-price math and Claude Code's estimate is observable.
