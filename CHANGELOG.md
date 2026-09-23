@@ -2,6 +2,8 @@
 
 ## UNRELEASED
 
+- **Add: claude-opus-5-5 model** — Anthropic's Claude Opus 5.5 is now selectable via `/model`, and the `opus` shortcut resolves to it (use the explicit `claude-opus-5` ID to pin Opus 5). Registers at 1M and requests `claude-opus-5-5[1m]`, same `[1m]` policy as Opus 5/4.8 (inferred, pending a diag probe run). Metadata is filled from pi's remote-catalog overlay cache (`agentDir/models-store.json`) since pi-ai's bundled catalog doesn't carry it yet.
+
 - **Fix: AGENTS.md discovery follows request cwd** — `resolveAgentsMdPath` and `extractAgentsAppend` walk from the dispatch `cwd` instead of the bridge owner's `process.cwd()`, so adopted bridge sessions pick up the requesting project's AGENTS.md.
 
 - **Fix: Pi 0.86 normalized transcript compatibility** — provider streams now read the system prompt and tool declarations from transcript system messages, exclude those metadata records from Claude Code session history and cursor accounting, and start clean instead of resuming a nonexistent session when conversion produces no records. Pi peer and development dependencies now require 0.86+.

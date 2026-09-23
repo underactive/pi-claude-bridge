@@ -131,7 +131,7 @@ const SDK_TO_PI_TOOL_NAME: Record<string, string> = {
 	read: "read", write: "write", edit: "edit", bash: "bash",
 };
 
-// pi surfaces newly released Claude models (e.g. claude-opus-5) through its
+// pi surfaces newly released Claude models (e.g. claude-opus-5-5) through its
 // pi.dev remote-catalog overlay before pi-ai's bundled catalog carries them.
 // getModels() reads only the static catalog, so read the same overlay pi
 // persists (agentDir/models-store.json) and fill in the anthropic entries the

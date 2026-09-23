@@ -34,6 +34,8 @@ the footnote below the table).
 |---------------------------|------------------|-----------------|------------------|-----------------|
 | `claude-opus-5`           | 200K‡            | 200K             | 200K‡            | 200K‡           |
 | `claude-opus-5[1m]`      | 1M‡              | 1M              | 1M‡             | 1M‡             |
+| `claude-opus-5-5`‖         | —                | —               | —                | —               |
+| `claude-opus-5-5[1m]`‖    | —                | —               | —                | —               |
 | `claude-opus-4-8`         | 200K             | 200K            | 200K             | 200K            |
 | `claude-opus-4-8[1m]`    | 1M               | 1M              | 1M               | 1M              |
 | `claude-opus-4-7`         | 1M               | 1M              | 1M               | 1M              |
@@ -66,6 +68,8 @@ credits-on run: `claude-opus-5` bare → 200K, `claude-opus-5[1m]` → 1M (the
 `Pro, credits on` column). The other three columns are inferred by analogy to
 `opus-4-8`, whose window is unconditional across all four conditions. The bridge
 registers Opus 5 at 1M (requesting `claude-opus-5[1m]`), matching Opus 4.8.
+
+‖ **Opus 5.5 not yet probed.** The bridge requests `claude-opus-5-5[1m]` and registers 1M by analogy to Opus 5/4.8, pending a direct `diag/context-size.mjs` run.
 
 ## Error shapes
 
