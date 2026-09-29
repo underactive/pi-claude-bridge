@@ -379,10 +379,11 @@ function extractIsolatedSummaryPrompt(messages: Message[]): string {
 }
 
 function resultErrorText(message: SDKMessage): string {
-	const result = message as SDKMessage & { subtype?: string; errors?: unknown; error?: unknown };
+	const result = message as SDKMessage & { subtype?: string; errors?: unknown; error?: unknown; api_error_status?: number | null; terminal_reason?: string | null };
 	if (Array.isArray(result.errors)) return result.errors.map(String).join("\n");
 	if (typeof result.error === "string") return result.error;
-	return `Claude Code summary failed: ${result.subtype ?? "unknown result"}`;
+	const detail = [result.api_error_status != null && `http ${result.api_error_status}`, result.terminal_reason].filter(Boolean).join(", ");
+	return `Claude Code query failed: ${result.subtype ?? "unknown result"}${detail ? ` (${detail})` : ""}`;
 }
 
 function isolatedStreamFn(model: Model<any>, context: TranscriptContext, options?: SimpleStreamOptions): AssistantMessageEventStream {
@@ -596,7 +597,7 @@ function syncSharedSession(
 	// pi-side history rewrites such as /compact and session_tree: without it,
 	// missed = [].slice(cursor) can falsely hit REUSE and resume an unrelated
 	// longer CC session. See issue #25.
-	if (sharedSession && !sharedSession.needsRebuild && priorMessages.length >= sharedSession.cursor) {
+	if (sharedSession && !sharedSession.needsRebuild && sharedSession.cwd === cwd && priorMessages.length >= sharedSession.cursor) {
 		const missed = priorMessages.slice(sharedSession.cursor);
 		const trailingAssistantOnly =
 			missed.length === 1 && (missed[0] as { role?: string }).role === "assistant";
@@ -1578,8 +1579,8 @@ async function promptAndWait(
 	// provider call will see missed messages and trigger a Case 4 rebuild.
 	let resumeSessionId: string | null = null;
 	if (!options?.isolated && options?.context?.length) {
-		if (sharedSession) {
-			// Provider already has a session — just resume from it
+		if (sharedSession?.cwd === cwd) {
+			// Provider already has a session for this cwd — just resume from it
 			// Any missed messages from other providers were already handled by the provider's Case 4
 			resumeSessionId = sharedSession.sessionId;
 		} else {
@@ -1641,7 +1642,7 @@ async function promptAndWait(
 	let wasAborted = false;
 	const onAbort = () => {
 		wasAborted = true;
-		sdkQuery.interrupt().catch(() => { try { sdkQuery.close(); } catch {} });
+		abortSdkQuery(sdkQuery);
 	};
 	if (signal?.aborted) { onAbort(); throw new Error("Aborted"); }
 	signal?.addEventListener("abort", onAbort, { once: true });
@@ -1719,7 +1720,7 @@ async function promptAndWait(
 
 // --- Extension registration ---
 
-const DEFAULT_TOOL_DESCRIPTION_FULL = "Delegate to Claude Code for a second opinion or analysis (code review, architecture questions, debugging theories), or to autonomously handle a task. Defaults to read-only mode — use full mode when the user wants to delegate a task that requires changes. Prefer to handle straightforward tasks yourself.";
+const defaultToolDescriptionFull = (defaultMode: string) => `Delegate to Claude Code for a second opinion or analysis (code review, architecture questions, debugging theories), or to autonomously handle a task. Defaults to ${defaultMode} mode — use full mode when the user wants to delegate a task that requires changes. Prefer to handle straightforward tasks yourself.`;
 const DEFAULT_TOOL_DESCRIPTION_NETWORK = "Delegate to Claude Code for a second opinion or analysis (code review, architecture questions, debugging theories). Read-only with web access — Claude Code can explore the codebase and fetch web content but not make changes. Prefer to handle straightforward tasks yourself.";
 const DEFAULT_TOOL_DESCRIPTION = "Delegate to Claude Code for a second opinion or analysis (code review, architecture questions, debugging theories). Read-only, no network access — Claude Code can explore the codebase but not make changes or fetch web content. Prefer to handle straightforward tasks yourself.";
 
@@ -1867,21 +1868,28 @@ export default function (pi: ExtensionAPI) {
 
 	const modeValues = allowFull ? ["read", "full", "none"] as const : ["read", "none"] as const;
 	const defaultMode = modeValues.find((m) => m === askConf?.defaultMode) ?? "read";
-	let modeDesc = `"read" (default): questions about the codebase — review, analysis, explain. "none": general knowledge only (no file access).`;
-	if (allowFull) modeDesc += ` "full": allows writing and bash execution (careful: runs without feedback to pi).`;
+	const modeHelp: Record<string, string> = {
+		read: "questions about the codebase — review, analysis, explain.",
+		none: "general knowledge only (no file access).",
+		full: "allows writing and bash execution (careful: runs without feedback to pi).",
+	};
+	const modeDesc = ["read", "none", ...(allowFull ? ["full"] : [])]
+		.map((m) => `"${m}"${m === defaultMode ? " (default)" : ""}: ${modeHelp[m]}`)
+		.join(" ");
+	const historyDesc = defaultIsolated ? "By default Claude sees only this prompt." : "By default Claude sees the full conversation history.";
 
 	if (askConf?.enabled !== false) {
 		const askClaudeParams = Type.Object({
-			prompt: Type.String({ description: "The question or task for Claude Code. By default Claude sees the full conversation history. Don't research up front, let Claude explore." }),
+			prompt: Type.String({ description: `The question or task for Claude Code. ${historyDesc} Don't research up front, let Claude explore.` }),
 			mode: Type.Optional(StringEnum(modeValues, { description: modeDesc })),
 			model: Type.Optional(Type.String({ description: 'Claude model (e.g. "opus", "sonnet", "haiku", or a bridge-registered full ID; other IDs are rejected). Defaults to "opus".' })),
 			thinking: Type.Optional(StringEnum(["off", "minimal", "low", "medium", "high", "xhigh"] as const, { description: "Thinking effort level. Omit to use Claude Code's default." })),
-			isolated: Type.Optional(Type.Boolean({ description: "When true, Claude sees only this prompt (clean session). When false (default), Claude sees the full conversation history." })),
+			isolated: Type.Optional(Type.Boolean({ description: `When true, Claude sees only this prompt (clean session). When false, Claude sees the full conversation history. Defaults to ${defaultIsolated}.` })),
 		});
 		pi.registerTool<typeof askClaudeParams>({
-			name: askConf?.name ?? "AskClaude",
+			name: askClaudeToolName,
 			label: askConf?.label ?? "Ask Claude Code",
-			description: askConf?.description ?? (allowFull ? DEFAULT_TOOL_DESCRIPTION_FULL : askConf?.allowNetwork ? DEFAULT_TOOL_DESCRIPTION_NETWORK : DEFAULT_TOOL_DESCRIPTION),
+			description: askConf?.description ?? (allowFull ? defaultToolDescriptionFull(defaultMode) : askConf?.allowNetwork ? DEFAULT_TOOL_DESCRIPTION_NETWORK : DEFAULT_TOOL_DESCRIPTION),
 			parameters: askClaudeParams,
 			renderCall(args, theme) {
 				let text = theme.fg("mdLink", theme.bold("AskClaude "));

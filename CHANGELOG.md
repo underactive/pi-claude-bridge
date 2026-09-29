@@ -4,6 +4,8 @@
 
 - **Fix: steer/followUp replay keeps images and message boundaries** — deferred user messages are stored as content blocks and replayed through the prompt stream, so attached images survive; multiple user messages in one turn are joined with a blank line.
 
+- **Fix: AskClaude session resume, error text, abort, and descriptions** — AskClaude only resumes the shared session when its cwd matches (otherwise rebuilds), and `syncSharedSession` no longer reuses a session minted for a different cwd. Non-success results now report `Claude Code query failed: <subtype>` with `api_error_status`/`terminal_reason` when present. AskClaude cancellation now interrupts and closes the subprocess like the provider path. Tool/mode/history descriptions reflect the configured `defaultMode` and `defaultIsolated`.
+
 - **Fix: stop mangling AGENTS.md when forwarding to Claude Code** — sanitization no longer rewrites every bare word `pi` to `environment` or every `.pi` suffix; only `~/.pi`, `.pi/`, and standalone `.pi` path tokens are rewritten to `.claude`.
 
 - **Tests: unit coverage for the SDK-to-pi stream state machine** — `processStreamEvent`, `processAssistantMessage`, `consumeQuery`, and `updateUsage` are exposed via `__test` and exercised with scripted SDK messages (tool_use turn ending, result error subtypes, usage mapping, `cacheWrite1h` clamp, thinking signature accumulation) without a live subscription.
