@@ -14,14 +14,14 @@ export function verifyWrittenSession(jsonlPath: string, expectedSessionId: strin
 	try {
 		st = statSync(jsonlPath);
 	} catch (e) {
-		warnings.push(`file missing after save — path=${jsonlPath} err=${e.message}`);
+		warnings.push(`file missing after save — path=${jsonlPath} err=${e instanceof Error ? e.message : String(e)}`);
 		return warnings;
 	}
 	let content;
 	try {
 		content = readFileSync(jsonlPath, "utf8");
 	} catch (e) {
-		warnings.push(`file unreadable — path=${jsonlPath} size=${st.size} err=${e.message}`);
+		warnings.push(`file unreadable — path=${jsonlPath} size=${st.size} err=${e instanceof Error ? e.message : String(e)}`);
 		return warnings;
 	}
 	const lines = content.split("\n").filter((l) => l.trim().length > 0);
@@ -30,13 +30,15 @@ export function verifyWrittenSession(jsonlPath: string, expectedSessionId: strin
 		return warnings;
 	}
 	try {
-		const firstRec = JSON.parse(lines[0]);
-		const lastRec = JSON.parse(lines[lines.length - 1]);
-		if (firstRec.sessionId !== expectedSessionId || lastRec.sessionId !== expectedSessionId) {
-			warnings.push(`sessionId drift — expected=${expectedSessionId} first=${firstRec.sessionId} last=${lastRec.sessionId}`);
+		for (const [i, line] of lines.entries()) {
+			const rec = JSON.parse(line);
+			if (rec.sessionId !== expectedSessionId) {
+				warnings.push(`sessionId drift — expected=${expectedSessionId} record=${i} actual=${rec.sessionId}`);
+				break;
+			}
 		}
 	} catch (e) {
-		warnings.push(`malformed JSONL — path=${jsonlPath} err=${e.message}`);
+		warnings.push(`malformed JSONL — path=${jsonlPath} err=${e instanceof Error ? e.message : String(e)}`);
 	}
 	return warnings;
 }

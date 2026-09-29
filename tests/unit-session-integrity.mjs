@@ -8,6 +8,7 @@
 import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { repairToolPairing } from "cc-session-io";
 import { verifyWrittenSession } from "../src/session-verify.js";
@@ -46,13 +47,14 @@ describe("repairToolPairing", () => {
 });
 
 describe("verifyWrittenSession", () => {
-	const dir = mkdtempSync("/tmp/verify-session-");
-	const path = join(dir, "session.jsonl");
+	const dir = mkdtempSync(join(tmpdir(), "verify-session-"));
+	const file = (name) => join(dir, name + ".jsonl");
 	const SID = "abc-123";
 	const rec = (sessionId, i) => JSON.stringify({ sessionId, idx: i });
 	after(() => rmSync(dir, { recursive: true, force: true }));
 
 	it("no warnings when file round-trips correctly", () => {
+		const path = file("roundtrip");
 		writeFileSync(path, [rec(SID, 0), rec(SID, 1), rec(SID, 2)].join("\n") + "\n");
 		assert.deepEqual(verifyWrittenSession(path, SID, 3), []);
 	});
@@ -72,6 +74,7 @@ describe("verifyWrittenSession", () => {
 	});
 
 	it("warns on record count mismatch", () => {
+		const path = file("count-mismatch");
 		writeFileSync(path, [rec(SID, 0), rec(SID, 1)].join("\n") + "\n");
 		const warnings = verifyWrittenSession(path, SID, 5);
 		assert.equal(warnings.length, 1);
@@ -79,13 +82,23 @@ describe("verifyWrittenSession", () => {
 	});
 
 	it("warns on sessionId drift", () => {
+		const path = file("mismatch");
 		writeFileSync(path, [rec(SID, 0), rec("different-sid", 1)].join("\n") + "\n");
 		const warnings = verifyWrittenSession(path, SID, 2);
 		assert.equal(warnings.length, 1);
 		assert.match(warnings[0], /sessionId drift/);
 	});
 
+	it("warns on sessionId drift in a middle record", () => {
+		const path = file("middle-drift");
+		writeFileSync(path, [rec(SID, 0), rec("other", 1), rec(SID, 2)].join("\n") + "\n");
+		const warnings = verifyWrittenSession(path, SID, 3);
+		assert.equal(warnings.length, 1);
+		assert.match(warnings[0], /sessionId drift.*record=1/);
+	});
+
 	it("warns on malformed JSONL", () => {
+		const path = file("malformed");
 		writeFileSync(path, "not json\n");
 		const warnings = verifyWrittenSession(path, SID, 1);
 		assert.equal(warnings.length, 1);
