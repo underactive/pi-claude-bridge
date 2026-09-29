@@ -56,6 +56,15 @@ describe("skills block extraction", () => {
 		assert.ok(!result.includes("Some other system prompt"));
 	});
 
+	it("extracts the block when the lead-in prose is reworded", () => {
+		const prompt = "Intro.\n\nSkills you may use:\nUse the read tool to load a skill's file.\n\n<available_skills>\n  <skill>\n    <name>x</name>\n  </skill>\n</available_skills>\n\nTail.";
+		const result = extractSkillsBlock(prompt);
+		assert.ok(result.startsWith("Skills you may use:"));
+		assert.ok(result.includes("(mcp__custom-tools__read)"));
+		assert.ok(result.endsWith("</available_skills>"));
+		assert.ok(!result.includes("Intro.") && !result.includes("Tail."));
+	});
+
 	it("no skills in prompt → undefined", () => {
 		assert.strictEqual(extractSkillsBlock("Just a normal prompt"), undefined);
 		assert.strictEqual(extractSkillsBlock(undefined), undefined);
@@ -63,7 +72,7 @@ describe("skills block extraction", () => {
 	});
 
 	it("malformed: start marker but no end marker → undefined", () => {
-		const partial = "The following skills provide specialized instructions for specific tasks.\nBut no closing tag.";
+		const partial = "The following skills provide specialized instructions for specific tasks.\n\n<available_skills>\nBut no closing tag.";
 		assert.strictEqual(extractSkillsBlock(partial), undefined);
 	});
 });

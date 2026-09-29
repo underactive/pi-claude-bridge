@@ -7,12 +7,15 @@ export const MCP_TOOL_PREFIX = `mcp__${MCP_SERVER_NAME}__`;
 // Extract skills block from pi's system prompt for forwarding to Claude Code.
 export function extractSkillsBlock(systemPrompt?: string, rewriteReadTool = true): string | undefined {
 	if (!systemPrompt) return undefined;
-	const startMarker = "The following skills provide specialized instructions for specific tasks.";
+	const startTag = "<available_skills>";
 	const endMarker = "</available_skills>";
-	const start = systemPrompt.indexOf(startMarker);
-	if (start === -1) return undefined;
-	const end = systemPrompt.indexOf(endMarker, start);
+	const tagIdx = systemPrompt.indexOf(startTag);
+	if (tagIdx === -1) return undefined;
+	const end = systemPrompt.indexOf(endMarker, tagIdx);
 	if (end === -1) return undefined;
+	const leadInEnd = systemPrompt.slice(0, tagIdx).trimEnd().length;
+	const paragraphBreak = systemPrompt.lastIndexOf("\n\n", leadInEnd - 1);
+	const start = paragraphBreak === -1 ? 0 : paragraphBreak + 2;
 	const block = systemPrompt.slice(start, end + endMarker.length).trim();
 	return rewriteReadTool ? rewriteSkillsBlock(block) : block;
 }
