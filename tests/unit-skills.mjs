@@ -37,6 +37,12 @@ describe("skills block extraction", () => {
 		assert.ok(!result.includes("Use the read tool to load a skill's file\n"));
 	});
 
+	it("leaves read tool reference unrewritten when rewriteReadTool is false", () => {
+		const result = extractSkillsBlock(SYSTEM_PROMPT, false);
+		assert.ok(result.includes("Use the read tool to load a skill's file"));
+		assert.ok(!result.includes("mcp__custom-tools__read"));
+	});
+
 	it("preserves skill paths as-is", () => {
 		const result = extractSkillsBlock(SYSTEM_PROMPT);
 		assert.ok(result.includes("/Users/esd/projects/pi-my-stuff/skills/br/SKILL.md"));

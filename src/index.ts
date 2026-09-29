@@ -1619,8 +1619,8 @@ async function promptAndWait(
 		: modeDisallowed;
 
 	// Skills append
-	const skillsBlock = options?.appendSkills !== false && options?.systemPrompt
-		? extractSkillsBlock(options.systemPrompt) : undefined;
+	const skillsBlock = options?.appendSkills !== false && mode !== "none" && options?.systemPrompt
+		? extractSkillsBlock(options.systemPrompt, false) : undefined;
 
 	// Effort
 	const effort = options?.thinking && options.thinking !== "off"
