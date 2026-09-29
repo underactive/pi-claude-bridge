@@ -25,12 +25,12 @@ import { createSession, deleteSession, repairToolPairing } from "cc-session-io";
 import { appendFileSync, mkdirSync, readFileSync, realpathSync, statSync } from "fs";
 import { homedir } from "os";
 import { dirname, join } from "path";
-import { PROVIDER_ID, messageContentToText, convertPiMessages } from "./convert.js";
+import { PROVIDER_ID, SDK_TO_PI_TOOL_NAME, messageContentToText, convertPiMessages } from "./convert.js";
 import { applyLongContext, buildModels, claudeCodeModelId, type LongContextSettings, MODEL_IDS_IN_ORDER, mergeOverlayModels, resolveModel as _resolveModel } from "./models.js";
 import { MCP_SERVER_NAME, MCP_TOOL_PREFIX, extractSkillsBlock } from "./skills.js";
 import { verifyWrittenSession as _verifyWrittenSession } from "./session-verify.js";
 import { extractAllToolResults as _extractAllToolResults, type McpResult } from "./extract-tool-results.js";
-import { QueryContext, ctx } from "./query-state.js";
+import { QueryContext, ctx, emptyAssistantMessage } from "./query-state.js";
 import { loadConfig, type Config } from "./config.js";
 import { extractAgentsAppend } from "./agents-md.js";
 import { jsonSchemaToZodShape } from "./typebox-to-zod.js";
@@ -127,9 +127,7 @@ function diagDump(label: string, data: Record<string, unknown>) {
 // registration can occur for the next session.
 const ACTIVE_STREAM_SIMPLE_KEY = Symbol.for("claude-bridge:activeStreamSimple");
 
-const SDK_TO_PI_TOOL_NAME: Record<string, string> = {
-	read: "read", write: "write", edit: "edit", bash: "bash",
-};
+const DEFAULT_MAX_TURNS = 50;
 
 // pi surfaces newly released Claude models (e.g. claude-opus-5-5) through its
 // pi.dev remote-catalog overlay before pi-ai's bundled catalog carries them.
@@ -197,11 +195,11 @@ const MODE_DISALLOWED_TOOLS: Record<string, string[]> = {
 };
 
 // Read-only handshake for orchestrators that wrap this provider in a
-// read-only boundary. Pi's --tools allowlist only gates pi's own tool loop;
-// the Claude Code session behind this provider runs its own Write/Edit/Bash
-// under bypassPermissions and could mutate files regardless. When the env
-// var is set to "read", the provider path blocks the same CC tools as
-// AskClaude's "read" mode. Checked per query, not at module load:
+// read-only boundary. Provider-path built-ins are already disabled by
+// `tools: []` and bridged pi tools are gated by pi's --tools allowlist, so
+// this is a guard against future SDK defaults. When the env var is set to
+// "read", the provider path blocks the same CC tools as AskClaude's "read"
+// mode. Checked per query, not at module load:
 // orchestrators toggle the variable on the parent process around plan mode
 // and set it for spawned subagents.
 export const PROVIDER_FORCE_MODE_ENV = "PI_CLAUDE_BRIDGE_FORCE_MODE";
@@ -351,18 +349,19 @@ async function* wrapPromptStream(blocks: ContentBlockParam[]): AsyncIterable<SDK
 	};
 }
 
-function newAssistantOutput(model: Model<any>, text: string, stopReason: AssistantMessage["stopReason"], errorMessage?: string): AssistantMessage {
+// interrupt() asks the CLI to stop gracefully; close() kills it immediately.
+// Both are needed — interrupt alone lets the current API call finish.
+function abortSdkQuery(sdkQuery: ReturnType<typeof query>): void {
+	void sdkQuery.interrupt().catch(() => {});
+	try { sdkQuery.close(); } catch {}
+}
+
+function newAssistantOutput(model: Model<any>, text: string, stopReason: AssistantMessage["stopReason"], errorText?: string): AssistantMessage {
 	return {
-		role: "assistant",
+		...emptyAssistantMessage(model),
 		content: text ? [{ type: "text", text }] : [],
-		api: model.api,
-		provider: model.provider,
-		model: model.id,
-		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
 		stopReason,
-		...(errorMessage ? { errorMessage } : {}),
-		timestamp: Date.now(),
+		...(errorText ? { errorMessage: errorText } : {}),
 	};
 }
 
@@ -402,8 +401,7 @@ async function runIsolatedSummary(
 	let wasAborted = false;
 	const onAbort = () => {
 		wasAborted = true;
-		void sdkQuery?.interrupt().catch(() => {});
-		try { sdkQuery?.close(); } catch {}
+		if (sdkQuery) abortSdkQuery(sdkQuery);
 	};
 
 	try {
@@ -509,10 +507,6 @@ interface SyncResult {
 	preserveSharedSession?: boolean;
 }
 
-/**
- * Ensure the shared session has all messages up to (but not including) the last user message.
- * Returns session ID to resume from, or null if no resume needed.
- */
 // Read the session file we just wrote and sanity-check it. Warns instead of
 // throwing — CC may be more tolerant than our checks, so a false positive
 // shouldn't block the user. Pure logic is in session-verify.js; this wrapper
@@ -579,9 +573,9 @@ function debugSessionPaths(label: string, cwd: string, jsonlPath: string): void 
 //
 // Why reuse the sessionId across rebuilds:
 //   CC re-reads the JSONL on every --resume call — no in-process UUID
-//   caching. Validated in tests/exp-session-clear.mjs, including the case
-//   where CC had appended its own tool_use/tool_result records between
-//   rebuilds. Preserving the UUID means stable log correlation across
+//   caching. Validated in tests/int-session-resume.mjs (Case 2 → Case 4 →
+//   Case 3 sequence), including the case where CC had appended its own
+//   tool_use/tool_result records between rebuilds. Preserving the UUID means stable log correlation across
 //   provider switches and no orphaned session files.
 //
 // Log strings still say "Case 1/2/3/4" so existing diagnostics (int-cache.sh,
@@ -701,7 +695,7 @@ export const __test = {
 
 // --- Provider helpers: tool name mapping ---
 
-function mapToolName(name: string, customToolNameToPi?: Map<string, string>): string {
+function mapSdkToolNameToPi(name: string, customToolNameToPi?: Map<string, string>): string {
 	const normalized = name.toLowerCase();
 	const builtin = SDK_TO_PI_TOOL_NAME[normalized];
 	if (builtin) return builtin;
@@ -740,15 +734,8 @@ function mapToolArgs(
 	return result;
 }
 
-// --- Provider helpers: tool resolution ---
-
-// --- Provider helpers: tool bridge ---
-
-// --- Query state ---
-// QueryContext lives in query-state.js so tests can import it without
-// activating the extension.
-
-// Global (not query state):
+// Global (not query state; QueryContext lives in query-state.js so tests can
+// import it without activating the extension):
 let piUI: ExtensionUIContext | null = null;
 const activeQueryContexts = new Set<QueryContext>();
 
@@ -894,6 +881,15 @@ const REASONING_TO_EFFORT: Record<string, EffortLevel> = {
 	minimal: "low", low: "low", medium: "medium", high: "high", xhigh: "max",
 };
 
+// Prefer the model's own thinkingLevelMap when present (pi-ai 0.72+ ships
+// per-model overrides — e.g. opus-4-7 wants xhigh→xhigh, not xhigh→max).
+// Fall back to our generic table for older pi-ai or unmapped levels.
+function resolveEffort(model: Model<any>, level: string | undefined): EffortLevel | undefined {
+	if (!level || level === "off") return undefined;
+	const levelMap: Record<string, string | null | undefined> | undefined = model.thinkingLevelMap;
+	return (levelMap?.[level] as EffortLevel | undefined) ?? REASONING_TO_EFFORT[level];
+}
+
 // --- Provider helpers: misc ---
 
 function mapStopReason(reason: string | undefined): "stop" | "length" | "toolUse" {
@@ -1013,7 +1009,7 @@ function processStreamEvent(
 			c.turnToolCallIds.push(event.content_block.id);
 			c.turnBlocks.push({
 				type: "toolCall", id: event.content_block.id,
-				name: mapToolName(event.content_block.name, customToolNameToPi),
+				name: mapSdkToolNameToPi(event.content_block.name, customToolNameToPi),
 				arguments: (event.content_block.input as Record<string, unknown>) ?? {},
 				partialJson: "", index: event.index,
 			});
@@ -1089,6 +1085,15 @@ function processStreamEvent(
 	}
 }
 
+function pushCompleteTextBlock(c: QueryContext, text: string): void {
+	ensureTurnStarted(c);
+	c.turnBlocks.push({ type: "text", text });
+	const idx = c.turnBlocks.length - 1;
+	c.currentPiStream?.push({ type: "text_start", contentIndex: idx, partial: c.turnOutput });
+	c.currentPiStream?.push({ type: "text_delta", contentIndex: idx, delta: text, partial: c.turnOutput });
+	c.currentPiStream?.push({ type: "text_end", contentIndex: idx, content: text, partial: c.turnOutput });
+}
+
 // The SDK always yields `assistant` messages (completed content blocks) after streaming.
 // When stream_events already delivered the content, this is a no-op. But after
 // resetTurnState (e.g. tool result delivery), if the next turn's assistant message
@@ -1104,12 +1109,7 @@ function processAssistantMessage(message: SDKMessage, model: Model<any>, customT
 	if (DEBUG) debug(`processAssistantMessage fallback: ${assistantMsg.content.length} blocks, types=${assistantMsg.content.map((b: any) => b.type).join(",")}`);
 	for (const block of assistantMsg.content) {
 		if (block.type === "text" && block.text) {
-			ensureTurnStarted(c);
-			c.turnBlocks.push({ type: "text", text: block.text });
-			const idx = c.turnBlocks.length - 1;
-			c.currentPiStream?.push({ type: "text_start", contentIndex: idx, partial: c.turnOutput });
-			c.currentPiStream?.push({ type: "text_delta", contentIndex: idx, delta: block.text, partial: c.turnOutput });
-			c.currentPiStream?.push({ type: "text_end", contentIndex: idx, content: block.text, partial: c.turnOutput });
+			pushCompleteTextBlock(c, block.text);
 		} else if (block.type === "thinking") {
 			ensureTurnStarted(c);
 			c.turnBlocks.push({ type: "thinking", thinking: block.thinking ?? "", thinkingSignature: block.signature ?? "" });
@@ -1121,10 +1121,10 @@ function processAssistantMessage(message: SDKMessage, model: Model<any>, customT
 			ensureTurnStarted(c);
 			c.turnSawToolCall = true;
 			c.turnToolCallIds.push(block.id);
-			const mappedArgs = mapToolArgs(mapToolName(block.name, customToolNameToPi), block.input);
+			const mappedArgs = mapToolArgs(mapSdkToolNameToPi(block.name, customToolNameToPi), block.input);
 			c.turnBlocks.push({
 				type: "toolCall", id: block.id,
-				name: mapToolName(block.name, customToolNameToPi),
+				name: mapSdkToolNameToPi(block.name, customToolNameToPi),
 				arguments: mappedArgs,
 			});
 			const idx = c.turnBlocks.length - 1;
@@ -1170,13 +1170,7 @@ async function consumeQuery(
 				logServedContextWindow("result", message, model);
 				logSdkCost("result", message, queryCtx);
 				if (!queryCtx.turnSawStreamEvent && message.subtype === "success") {
-					ensureTurnStarted(queryCtx);
-					const text = message.result || "";
-					queryCtx.turnBlocks.push({ type: "text", text });
-					const idx = queryCtx.turnBlocks.length - 1;
-					queryCtx.currentPiStream?.push({ type: "text_start", contentIndex: idx, partial: queryCtx.turnOutput });
-					queryCtx.currentPiStream?.push({ type: "text_delta", contentIndex: idx, delta: text, partial: queryCtx.turnOutput });
-					queryCtx.currentPiStream?.push({ type: "text_end", contentIndex: idx, content: text, partial: queryCtx.turnOutput });
+					pushCompleteTextBlock(queryCtx, message.result || "");
 				} else if (message.subtype !== "success" && queryCtx.turnOutput) {
 					queryCtx.turnOutput.stopReason = "error";
 					queryCtx.turnOutput.errorMessage = resultErrorText(message);
@@ -1210,6 +1204,12 @@ async function consumeQuery(
 	debug(`consumeQuery: for-await loop exited, wasAborted=${wasAborted()}, capturedSessionId=${capturedSessionId?.slice(0, 8) ?? "none"}`);
 
 	return { capturedSessionId };
+}
+
+function drainPendingToolCalls(c: QueryContext, text: string): void {
+	for (const pending of c.pendingToolCalls.values()) pending.resolve({ content: [{ type: "text", text }] });
+	c.pendingToolCalls.clear();
+	c.pendingResults.clear();
 }
 
 /** Provider entry point. Pi calls this for each new prompt and each tool result.
@@ -1363,13 +1363,7 @@ function streamClaudeAgentSdk(model: Model<any>, context: TranscriptContext, opt
 	const strictMcpConfigEnabled = providerSettings.strictMcpConfig !== false;
 	const claudeExecutable = providerSettings.pathToClaudeCodeExecutable;
 
-	// Prefer the model's own thinkingLevelMap when present (pi-ai 0.72+ ships
-	// per-model overrides — e.g. opus-4-7 wants xhigh→xhigh, not xhigh→max).
-	// Fall back to our generic table for older pi-ai or unmapped levels.
-	const effort = options?.reasoning
-		? ((model as any).thinkingLevelMap?.[options.reasoning] as EffortLevel | undefined)
-			?? REASONING_TO_EFFORT[options.reasoning]
-		: undefined;
+	const effort = resolveEffort(model, options?.reasoning);
 
 	// cliModel is the actual id sent to Claude Code (may carry [1m]); model.id is the
 	// pi-registered id. Log cliModel so debug lines reflect what CC actually received.
@@ -1409,7 +1403,7 @@ function streamClaudeAgentSdk(model: Model<any>, context: TranscriptContext, opt
 		...(mcpServers ? { mcpServers } : {}),
 		...(resumeSessionId ? { resume: resumeSessionId } : {}),
 		...(claudeExecutable ? { pathToClaudeCodeExecutable: claudeExecutable } : {}),
-		maxTurns: providerSettings.maxTurns ?? 50,
+		maxTurns: providerSettings.maxTurns ?? DEFAULT_MAX_TURNS,
 		...makeCliDebugOptions("provider"),
 	};
 
@@ -1432,20 +1426,12 @@ function streamClaudeAgentSdk(model: Model<any>, context: TranscriptContext, opt
 	// 4. Capture context for abort handling
 	const abortCtx = queryCtx;
 
-	const requestAbort = () => {
-		// interrupt() asks the CLI to stop gracefully; close() kills it immediately.
-		// Both are needed — interrupt alone lets the current API call finish.
-		void sdkQuery.interrupt().catch(() => {});
-		try { sdkQuery.close(); } catch {}
-	};
 	const onAbort = () => {
 		wasAborted = true;
 		// Prevent stale deferred messages from being replayed by parent on pop
 		abortCtx.deferredUserMessages = [];
-		for (const pending of abortCtx.pendingToolCalls.values()) { pending.resolve({ content: [{ type: "text", text: "Operation aborted" }] }); }
-		abortCtx.pendingToolCalls.clear();
-		abortCtx.pendingResults.clear();
-		requestAbort();
+		drainPendingToolCalls(abortCtx, "Operation aborted");
+		abortSdkQuery(sdkQuery);
 	};
 	if (options?.signal) {
 		if (options.signal.aborted) onAbort();
@@ -1542,9 +1528,7 @@ function streamClaudeAgentSdk(model: Model<any>, context: TranscriptContext, opt
 				queryCtx.turnOutput.errorMessage = error instanceof Error ? error.message : String(error);
 			}
 			if (!isReentrant && queryCtx.activeQuery === sdkQuery) {
-				for (const pending of queryCtx.pendingToolCalls.values()) { pending.resolve({ content: [{ type: "text", text: "Query ended" }] }); }
-				queryCtx.pendingToolCalls.clear();
-				queryCtx.pendingResults.clear();
+				drainPendingToolCalls(queryCtx, "Query ended");
 				debug("provider: clearing activeQuery before error stream completion");
 				queryCtx.activeQuery = null;
 			}
@@ -1553,10 +1537,7 @@ function streamClaudeAgentSdk(model: Model<any>, context: TranscriptContext, opt
 		.finally(() => {
 			if (options?.signal) options.signal.removeEventListener("abort", onAbort);
 			if (queryCtx.activeQuery === sdkQuery) {
-				// Drain pending handlers for this query
-				for (const pending of queryCtx.pendingToolCalls.values()) { pending.resolve({ content: [{ type: "text", text: "Query ended" }] }); }
-				queryCtx.pendingToolCalls.clear();
-				queryCtx.pendingResults.clear();
+				drainPendingToolCalls(queryCtx, "Query ended");
 				queryCtx.activeQuery = null;
 			}
 			activeQueryContexts.delete(queryCtx);
@@ -1620,10 +1601,7 @@ async function promptAndWait(
 		? extractSkillsBlock(options.systemPrompt, false) : undefined;
 
 	// Effort
-	const effort = options?.thinking && options.thinking !== "off"
-		? ((model as any).thinkingLevelMap?.[options.thinking] as EffortLevel | undefined)
-			?? REASONING_TO_EFFORT[options.thinking]
-		: undefined;
+	const effort = resolveEffort(model, options?.thinking);
 
 	const claudeExecutable = providerSettings.pathToClaudeCodeExecutable;
 
@@ -1654,7 +1632,7 @@ async function promptAndWait(
 			...(resumeSessionId ? { resume: resumeSessionId } : {}),
 			...(options?.isolated ? { persistSession: false } : {}),
 			...(claudeExecutable ? { pathToClaudeCodeExecutable: claudeExecutable } : {}),
-			maxTurns: providerSettings.maxTurns ?? 50,
+			maxTurns: providerSettings.maxTurns ?? DEFAULT_MAX_TURNS,
 			...makeCliDebugOptions("askclaude"),
 		},
 	});
@@ -1691,7 +1669,7 @@ async function promptAndWait(
 					if (event?.type === "content_block_start" && event.content_block?.type === "tool_use") {
 						debug(`askClaude: tool_use start: ${event.content_block.name}`);
 						toolCalls.set(event.content_block.id, {
-							name: mapToolName(event.content_block.name),
+							name: mapSdkToolNameToPi(event.content_block.name),
 							status: "running",
 						});
 					}
@@ -1702,7 +1680,7 @@ async function promptAndWait(
 					for (const block of (message as any).message?.content ?? []) {
 						if (block.type === "tool_use") {
 							toolCalls.set(block.id, {
-								name: mapToolName(block.name),
+								name: mapSdkToolNameToPi(block.name),
 								status: "complete",
 								rawInput: block.input,
 							});

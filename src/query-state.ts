@@ -15,9 +15,19 @@ export interface PendingToolCall {
 	resolve: (result: McpResult) => void;
 }
 
+export function emptyAssistantMessage(model: Model<any>): AssistantMessage {
+	return {
+		role: "assistant", content: [],
+		api: model.api, provider: model.provider, model: model.id,
+		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+		stopReason: "stop", timestamp: Date.now(),
+	};
+}
+
 export class QueryContext {
 	// Query-scoped (fully isolated per query)
-	activeQuery: unknown | null = null;
+	activeQuery: object | null = null;
 	currentPiStream: AssistantMessageEventStream | null = null;
 	latestCursor = 0;
 	pendingToolCalls = new Map<string, PendingToolCall>();
@@ -41,13 +51,7 @@ export class QueryContext {
 	}
 
 	resetTurnState(model: Model<any>): void {
-		this.turnOutput = {
-			role: "assistant", content: [],
-			api: model.api, provider: model.provider, model: model.id,
-			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
-			stopReason: "stop", timestamp: Date.now(),
-		};
+		this.turnOutput = emptyAssistantMessage(model);
 		this.turnStarted = false;
 		this.turnSawStreamEvent = false;
 		this.turnSawToolCall = false;

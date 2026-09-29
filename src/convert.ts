@@ -2,7 +2,7 @@
 // Extracted so they can be tested without pulling in the full extension runtime.
 
 import type { Message as PiMessage } from "@earendil-works/pi-ai";
-import type { Message as SessionMessage } from "cc-session-io";
+import type { ContentBlock, Message as SessionMessage } from "cc-session-io";
 import { pascalCase } from "change-case";
 
 export const PROVIDER_ID = "claude-bridge";
@@ -10,6 +10,10 @@ export const PROVIDER_ID = "claude-bridge";
 export const PI_TO_SDK_TOOL_NAME: Record<string, string> = {
 	read: "Read", write: "Write", edit: "Edit", bash: "Bash",
 };
+
+export const SDK_TO_PI_TOOL_NAME: Record<string, string> = Object.fromEntries(
+	Object.entries(PI_TO_SDK_TOOL_NAME).map(([pi, sdk]) => [sdk.toLowerCase(), pi]),
+);
 
 export function sanitizeToolId(id: string, cache: Map<string, string>): string {
 	const existing = cache.get(id);
@@ -35,7 +39,7 @@ export function messageContentToText(
 ): string {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
-	const parts = [];
+	const parts: string[] = [];
 	let hasText = false;
 	for (const block of content) {
 		if (block.type === "text" && block.text) { parts.push(block.text); hasText = true; }
@@ -49,15 +53,15 @@ export function convertPiMessages(
 	messages: PiMessage[],
 	customToolNameToSdk?: Map<string, string>,
 ): { anthropicMessages: SessionMessage[]; sanitizedIds: Map<string, string> } {
-	const anthropicMessages = [];
-	const sanitizedIds = new Map();
+	const anthropicMessages: SessionMessage[] = [];
+	const sanitizedIds = new Map<string, string>();
 
 	for (const msg of messages) {
 		if (msg.role === "user") {
 			if (typeof msg.content === "string") {
 				anthropicMessages.push({ role: "user", content: msg.content || "[empty]" });
 			} else if (Array.isArray(msg.content)) {
-				const parts = [];
+				const parts: ContentBlock[] = [];
 				for (const block of msg.content) {
 					if (block.type === "text" && block.text) parts.push({ type: "text", text: block.text });
 					else if (block.type === "image" && block.data && block.mimeType) {
@@ -70,7 +74,7 @@ export function convertPiMessages(
 			}
 		} else if (msg.role === "assistant") {
 			const content = Array.isArray(msg.content) ? msg.content : [];
-			const blocks = [];
+			const blocks: ContentBlock[] = [];
 			for (const block of content) {
 				if (block.type === "text" && block.text) {
 					blocks.push({ type: "text", text: block.text });

@@ -34,11 +34,11 @@ export function shortPath(p: string, cwd = process.cwd()): string {
 
 export function formatToolAction(tc: ToolCallState, cwd = process.cwd()): string | undefined {
 	const path = extractPath(tc.rawInput);
+	const input = tc.rawInput && typeof tc.rawInput === "object" ? tc.rawInput as Record<string, unknown> : undefined;
 	const verb = tc.name.toLowerCase().split(/\s/)[0];
 	if (verb === "read" || verb === "readfile") {
 		return path ? `Read(${shortPath(path, cwd)})` : "Read";
 	} else if (verb === "glob") {
-		const input = tc.rawInput as Record<string, unknown> | undefined;
 		const pat = typeof input?.pattern === "string" ? input.pattern.slice(0, 40) : "";
 		return pat ? `Glob(${pat})` : "Glob";
 	} else if (verb === "edit" || verb === "write" || verb === "writefile" || verb === "multiedit") {
@@ -48,19 +48,16 @@ export function formatToolAction(tc: ToolCallState, cwd = process.cwd()): string
 	} else if (verb === "bash" || verb === "terminal") {
 		return path ? `Bash(${path})` : "Bash";
 	} else if (verb === "agent") {
-		const input = tc.rawInput as Record<string, unknown> | undefined;
 		return `Agent(${String(input?.description ?? "").slice(0, 40)})`;
 	} else if (verb === "grep") {
-		const input = tc.rawInput as Record<string, unknown> | undefined;
 		const pat = typeof input?.pattern === "string" ? input.pattern.slice(0, 40) : "";
 		return pat ? `Grep(${pat})` : "Grep";
 	} else if (verb === "skill") {
-		const input = tc.rawInput as Record<string, unknown> | undefined;
 		const name = typeof input?.skill === "string" ? input.skill.slice(0, 40) : "";
 		return name ? `Skill(${name})` : "Skill";
 	} else if (verb === "todowrite" || verb === "taskcreate" || verb === "taskupdate") {
-		const todos = Array.isArray((tc.rawInput as any)?.todos) ? (tc.rawInput as any).todos : [];
-		const current = todos.find((t: any) => t.status === "in_progress") ?? todos.find((t: any) => t.status === "pending");
+		const todos = Array.isArray(input?.todos) ? input.todos as Array<{ status?: string; content?: string }> : [];
+		const current = todos.find((t) => t.status === "in_progress") ?? todos.find((t) => t.status === "pending");
 		const label = current ? String(current.content ?? "").slice(0, 40) : "";
 		return label || undefined;
 	} else if (verb === "askclaude") {
