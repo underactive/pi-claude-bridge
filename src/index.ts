@@ -693,6 +693,10 @@ export const __test = {
 		return sharedSession;
 	},
 	syncSharedSession,
+	processStreamEvent,
+	processAssistantMessage,
+	consumeQuery,
+	updateUsage,
 };
 
 // --- Provider helpers: tool name mapping ---
