@@ -185,6 +185,7 @@ const MODE_DISALLOWED_TOOLS: Record<string, string[]> = {
 		...ASKCLAUDE_ALWAYS_BLOCKED,
 		"Write", "Edit", "Bash", "NotebookEdit",
 		"EnterWorktree", "ExitWorktree", "CronCreate", "CronDelete", "TeamCreate", "TeamDelete",
+		"WebFetch", "WebSearch",
 	],
 	none: [
 		...ASKCLAUDE_ALWAYS_BLOCKED,
@@ -1577,6 +1578,7 @@ async function promptAndWait(
 		thinking?: string;
 		isolated?: boolean;
 		context?: Message[];
+		allowNetwork?: boolean;
 	},
 ): Promise<{ responseText: string; stopReason: string }> {
 	const cwd = process.cwd();
@@ -1604,7 +1606,10 @@ async function promptAndWait(
 	}
 
 	// Mode → disallowed tools
-	const disallowedTools = MODE_DISALLOWED_TOOLS[mode] ?? [];
+	const modeDisallowed = MODE_DISALLOWED_TOOLS[mode] ?? [];
+	const disallowedTools = mode === "read" && options?.allowNetwork
+		? modeDisallowed.filter((t) => t !== "WebFetch" && t !== "WebSearch")
+		: modeDisallowed;
 
 	// Skills append
 	const skillsBlock = options?.appendSkills !== false && options?.systemPrompt
@@ -1733,7 +1738,8 @@ async function promptAndWait(
 // --- Extension registration ---
 
 const DEFAULT_TOOL_DESCRIPTION_FULL = "Delegate to Claude Code for a second opinion or analysis (code review, architecture questions, debugging theories), or to autonomously handle a task. Defaults to read-only mode — use full mode when the user wants to delegate a task that requires changes. Prefer to handle straightforward tasks yourself.";
-const DEFAULT_TOOL_DESCRIPTION = "Delegate to Claude Code for a second opinion or analysis (code review, architecture questions, debugging theories). Read-only — Claude Code can explore the codebase but not make changes. Prefer to handle straightforward tasks yourself.";
+const DEFAULT_TOOL_DESCRIPTION_NETWORK = "Delegate to Claude Code for a second opinion or analysis (code review, architecture questions, debugging theories). Read-only with web access — Claude Code can explore the codebase and fetch web content but not make changes. Prefer to handle straightforward tasks yourself.";
+const DEFAULT_TOOL_DESCRIPTION = "Delegate to Claude Code for a second opinion or analysis (code review, architecture questions, debugging theories). Read-only, no network access — Claude Code can explore the codebase but not make changes or fetch web content. Prefer to handle straightforward tasks yourself.";
 
 const PREVIEW_MAX_CHARS = 1000;
 const PREVIEW_MAX_LINES = 6;
@@ -1893,7 +1899,7 @@ export default function (pi: ExtensionAPI) {
 		pi.registerTool<typeof askClaudeParams>({
 			name: askConf?.name ?? "AskClaude",
 			label: askConf?.label ?? "Ask Claude Code",
-			description: askConf?.description ?? (allowFull ? DEFAULT_TOOL_DESCRIPTION_FULL : DEFAULT_TOOL_DESCRIPTION),
+			description: askConf?.description ?? (allowFull ? DEFAULT_TOOL_DESCRIPTION_FULL : askConf?.allowNetwork ? DEFAULT_TOOL_DESCRIPTION_NETWORK : DEFAULT_TOOL_DESCRIPTION),
 			parameters: askClaudeParams,
 			renderCall(args, theme) {
 				let text = theme.fg("mdLink", theme.bold("AskClaude "));
@@ -1969,6 +1975,7 @@ export default function (pi: ExtensionAPI) {
 					const result = await promptAndWait(params.prompt, mode, toolCalls, signal, {
 						systemPrompt: ctx.getSystemPrompt(),
 						appendSkills: askConf?.appendSkills,
+						allowNetwork: askConf?.allowNetwork,
 						model: params.model,
 						thinking: params.thinking,
 						isolated,

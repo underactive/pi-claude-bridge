@@ -18,6 +18,7 @@ export interface Config {
 		defaultMode?: "full" | "read" | "none";
 		defaultIsolated?: boolean;
 		allowFullMode?: boolean;
+		allowNetwork?: boolean;
 		appendSkills?: boolean;
 	};
 	/** Low-level Claude Agent SDK plumbing. Most users won't need these. */
@@ -49,7 +50,7 @@ export function tryParseJson(path: string): Partial<Config> {
 }
 
 const GLOBAL_ONLY_PROVIDER_KEYS = ["pathToClaudeCodeExecutable", "strictMcpConfig", "settingSources", "plan", "longContextExtraUsage"] as const;
-const GLOBAL_ONLY_ASKCLAUDE_KEYS = ["enabled", "name", "description", "defaultMode", "allowFullMode"] as const;
+const GLOBAL_ONLY_ASKCLAUDE_KEYS = ["enabled", "name", "description", "defaultMode", "allowFullMode", "allowNetwork"] as const;
 
 export function loadConfig(cwd: string): Config {
 	const global = tryParseJson(join(homedir(), ".pi", "agent", "claude-bridge.json"));

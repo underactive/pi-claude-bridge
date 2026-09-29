@@ -19,9 +19,16 @@ describe("provider read-only handshake", () => {
 		}
 	});
 
+	it("blocks network tools in read mode", () => {
+		const blocked = providerDisallowedToolsFromEnv({ [PROVIDER_FORCE_MODE_ENV]: "read" });
+		for (const tool of ["WebFetch", "WebSearch"]) {
+			assert.ok(blocked.includes(tool), `expected ${tool} to be blocked`);
+		}
+	});
+
 	it("leaves exploration tools available in read mode", () => {
 		const blocked = providerDisallowedToolsFromEnv({ [PROVIDER_FORCE_MODE_ENV]: "read" });
-		for (const tool of ["Read", "Glob", "Grep", "WebFetch", "WebSearch", "Agent"]) {
+		for (const tool of ["Read", "Glob", "Grep", "Agent"]) {
 			assert.ok(!blocked.includes(tool), `expected ${tool} to stay available`);
 		}
 	});
