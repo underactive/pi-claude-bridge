@@ -2,6 +2,8 @@
 
 ## UNRELEASED
 
+- **Fix: integration test reliability** — Bash-based integration tests now provide a portable fallback for GNU coreutils' `timeout`, which is not installed by default on macOS. RPC tests wait for child-process streams before closing logs, and live integration files run serially to avoid shared session-state contention. The strict RPIV subagent regression still requires `../pi-subagents` checked out at 0.6.3 with its dependencies installed.
+
 - **Add: claude-sonnet-5-5 model** — Anthropic's Claude Sonnet 5.5 is now selectable via `/model`, and the `sonnet` shortcut resolves to it (use the explicit `claude-sonnet-5` ID to pin Sonnet 5). Registers at 1M and requests `claude-sonnet-5-5[1m]`; a direct SDK probe measured bare at 200K and `[1m]` at 1M. Falls back to Sonnet 5's `xhigh→max` thinking map when the catalog entry carries none. Metadata is filled from pi's remote-catalog overlay cache (`agentDir/models-store.json`) since pi-ai's bundled catalog doesn't carry it yet.
 
 - **Add: claude-opus-5-5 model** — Anthropic's Claude Opus 5.5 is now selectable via `/model`, and the `opus` shortcut resolves to it (use the explicit `claude-opus-5` ID to pin Opus 5). Registers at 1M and requests `claude-opus-5-5[1m]`, same `[1m]` policy as Opus 5/4.8 (inferred, pending a diag probe run). Metadata is filled from pi's remote-catalog overlay cache (`agentDir/models-store.json`) since pi-ai's bundled catalog doesn't carry it yet.

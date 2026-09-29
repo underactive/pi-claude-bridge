@@ -4,6 +4,29 @@
 
 set -euo pipefail
 
+# GNU coreutils' `timeout` is not available by default on macOS. All test
+# callers pass integer seconds and only distinguish success from failure, so
+# preserve the system binary when present and provide the needed subset when not.
+if ! command -v timeout >/dev/null 2>&1; then
+	timeout() {
+		local duration="$1"
+		shift
+		local command_pid watcher_pid status=0
+
+		"$@" &
+		command_pid=$!
+		# Detach the watcher from command-substitution pipes so successful commands
+		# do not wait for the full timeout before the captured output reaches EOF.
+		( sleep "$duration" && kill -TERM "$command_pid" 2>/dev/null ) </dev/null >/dev/null 2>&1 &
+		watcher_pid=$!
+
+		wait "$command_pid" 2>/dev/null || status=$?
+		kill "$watcher_pid" 2>/dev/null || true
+		wait "$watcher_pid" 2>/dev/null || true
+		return "$status"
+	}
+fi
+
 # Strip node_modules/.bin from PATH so we use the system pi, not the vendored one.
 __clean_path() {
 	echo "$PATH" | tr ':' '\n' | grep -v node_modules | tr '\n' ':'
