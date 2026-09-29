@@ -23,7 +23,18 @@ test("extractAgentsAppend uses the supplied cwd and returns sanitized CLAUDE blo
 	const append = extractAgentsAppend(nested);
 	assert.match(append ?? "", /^# CLAUDE\.md\n\n/);
 	assert.match(append ?? "", /\.claude/);
-	assert.doesNotMatch(append ?? "", /\.pi\b/);
+	assert.doesNotMatch(append ?? "", /\.pi\//);
+});
+
+test("extractAgentsAppend leaves bare pi words and identifiers untouched", () => {
+	const root = mkdtempSync(join(tmpdir(), "pi-claude-bridge-agents-"));
+	writeFileSync(join(root, "AGENTS.md"), "Call pi.on() or run pi install; see .pi/x and a.pi file.\n", "utf8");
+
+	const append = extractAgentsAppend(root) ?? "";
+	assert.match(append, /pi\.on\(\)/);
+	assert.match(append, /pi install/);
+	assert.match(append, /\.claude\/x/);
+	assert.match(append, /a\.pi file/);
 });
 
 test("explicit cwd wins over process.cwd for discovery", () => {

@@ -3,7 +3,7 @@
 // Pi uses AGENTS.md for long-lived instructions; Claude Code reads the same
 // content under "# CLAUDE.md". We walk up from cwd looking for AGENTS.md,
 // fall back to ~/.pi/agent/AGENTS.md, and rewrite pi-specific references
-// (~/.pi, .pi/, .pi, pi) to their Claude Code equivalents so any paths or
+// (~/.pi, .pi/, .pi) to their Claude Code equivalents so any paths or
 // references in the file still resolve inside the CC subprocess.
 
 import { existsSync, readFileSync } from "fs";
@@ -48,7 +48,6 @@ export function sanitizeAgentsContent(content: string): string {
 	let sanitized = content;
 	sanitized = sanitized.replace(/~\/\.pi\b/gi, "~/.claude");
 	sanitized = sanitized.replace(/(^|[\s'"`])\.pi\//g, "$1.claude/");
-	sanitized = sanitized.replace(/\b\.pi\b/gi, ".claude");
-	sanitized = sanitized.replace(/\bpi\b/gi, "environment");
+	sanitized = sanitized.replace(/(^|[\s'"`])\.pi(?=[\s'"`/]|$)/g, "$1.claude");
 	return sanitized;
 }

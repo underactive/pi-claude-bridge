@@ -2,6 +2,8 @@
 
 ## UNRELEASED
 
+- **Fix: stop mangling AGENTS.md when forwarding to Claude Code** — sanitization no longer rewrites every bare word `pi` to `environment` or every `.pi` suffix; only `~/.pi`, `.pi/`, and standalone `.pi` path tokens are rewritten to `.claude`.
+
 - **Tests: unit coverage for the SDK-to-pi stream state machine** — `processStreamEvent`, `processAssistantMessage`, `consumeQuery`, and `updateUsage` are exposed via `__test` and exercised with scripted SDK messages (tool_use turn ending, result error subtypes, usage mapping, `cacheWrite1h` clamp, thinking signature accumulation) without a live subscription.
 
 - **Fix: block WebFetch/WebSearch in AskClaude read mode** — read mode previously left web tools enabled under `bypassPermissions`, letting injected file content exfiltrate the shared pi conversation via a URL. They are now blocked by default (also for the provider read-only handshake); set global-only `askClaude.allowNetwork: true` to restore them in read mode.
