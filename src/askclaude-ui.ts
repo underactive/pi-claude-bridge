@@ -23,8 +23,7 @@ export function extractPath(rawInput: unknown): string | undefined {
 	return undefined;
 }
 
-export function shortPath(p: string): string {
-	const cwd = process.cwd();
+export function shortPath(p: string, cwd = process.cwd()): string {
 	if (p.startsWith(cwd + "/")) return p.slice(cwd.length + 1);
 	if (p.startsWith("/")) {
 		const parts = p.split("/");
@@ -33,17 +32,17 @@ export function shortPath(p: string): string {
 	return p;
 }
 
-export function formatToolAction(tc: ToolCallState): string | undefined {
+export function formatToolAction(tc: ToolCallState, cwd = process.cwd()): string | undefined {
 	const path = extractPath(tc.rawInput);
 	const verb = tc.name.toLowerCase().split(/\s/)[0];
 	if (verb === "read" || verb === "readfile") {
-		return path ? `Read(${shortPath(path)})` : "Read";
+		return path ? `Read(${shortPath(path, cwd)})` : "Read";
 	} else if (verb === "glob") {
 		const input = tc.rawInput as Record<string, unknown> | undefined;
 		const pat = typeof input?.pattern === "string" ? input.pattern.slice(0, 40) : "";
 		return pat ? `Glob(${pat})` : "Glob";
 	} else if (verb === "edit" || verb === "write" || verb === "writefile" || verb === "multiedit") {
-		return path ? `Edit(${shortPath(path)})` : "Edit";
+		return path ? `Edit(${shortPath(path, cwd)})` : "Edit";
 	} else if (verb === "bashoutput") {
 		return undefined; // redundant with preceding Bash call
 	} else if (verb === "bash" || verb === "terminal") {
