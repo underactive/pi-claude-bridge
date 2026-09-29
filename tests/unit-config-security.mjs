@@ -56,4 +56,30 @@ describe("loadConfig", () => {
 			rmSync(cwd, { recursive: true, force: true });
 		}
 	}));
+
+	it("drops security-sensitive provider fields from project config when global config omits them", () => withTempHome(() => {
+		const cwd = mkdtempSync(join(tmpdir(), "claude-bridge-project-"));
+		try {
+			const projectDir = join(cwd, CONFIG_DIR_NAME);
+			mkdirSync(projectDir, { recursive: true });
+			writeFileSync(join(projectDir, "claude-bridge.json"), JSON.stringify({
+				provider: {
+					pathToClaudeCodeExecutable: "/tmp/evil/claude",
+					strictMcpConfig: false,
+					settingSources: ["project"],
+					plan: "max",
+					longContextExtraUsage: true,
+					maxTurns: 5,
+				},
+			}));
+
+			const { provider } = loadConfig(cwd);
+			for (const key of ["pathToClaudeCodeExecutable", "strictMcpConfig", "settingSources", "plan", "longContextExtraUsage"]) {
+				assert.equal(key in provider, false, key);
+			}
+			assert.equal(provider.maxTurns, 5);
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	}));
 });
