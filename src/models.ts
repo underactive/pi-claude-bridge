@@ -121,6 +121,7 @@ export function claudeCodeModelId(model: { id: string }, settings: LongContextSe
 
 export function resolveModel<T extends { id: string }>(models: T[], input: string): T | undefined {
 	const lower = input.toLowerCase();
+	if (!lower) return undefined;
 	return models.find((m) => m.id === lower) ?? models.find((m) => m.id.includes(lower));
 }
 

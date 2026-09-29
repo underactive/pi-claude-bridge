@@ -267,6 +267,11 @@ describe("applyLongContext", () => {
 		assert.equal(passthrough[0], base[0]);
 		assert.deepEqual(passthrough[0].cost, mockPiAiModel("x").cost);
 	});
+
+	it("does not double-suffix a name that already contains 1M", () => {
+		const named = [{ ...buildModels([mockPiAiModel("claude-opus-4-8")])[0], name: "Claude Opus 4.8 1M" }];
+		assert.equal(applyLongContext(named, PRO)[0].name, "Claude Opus 4.8 1M");
+	});
 });
 
 describe("resolveModel", () => {
@@ -306,6 +311,14 @@ describe("resolveModel", () => {
 
 	it("returns undefined when no match", () => {
 		assert.equal(resolveModel(models, "gpt-9"), undefined);
+	});
+
+	it("returns undefined for an empty string", () => {
+		assert.equal(resolveModel(models, ""), undefined);
+	});
+
+	it("matches case-insensitively", () => {
+		assert.equal(resolveModel(models, "OPUS")?.id, "claude-opus-5-5");
 	});
 
 	it("returns the matched model object for CLI-arg conversion", () => {
