@@ -25,9 +25,8 @@ describe("tool-message integration", () => {
 	});
 
 	afterEach(async () => {
-		if (harness.pi().exitCode !== null) {
-			await startAndWait();
-		}
+		await stop();
+		await startAndWait();
 	});
 
 	after(async () => {
@@ -71,14 +70,14 @@ describe("tool-message integration", () => {
 		await send({
 			type: "prompt",
 			message: "Call SlowTool with seconds=2. Then repeat exactly what it returned.",
-		});
-		await waitForEvent("tool_execution_start");
+		}, 12_000);
+		await waitForEvent("tool_execution_start", 12_000);
 		await send({
 			type: "prompt",
 			message: "This is a steer message during tool execution.",
 			streamingBehavior: "steer",
-		});
-		await waitForEvent("agent_end");
+		}, 12_000);
+		await waitForEvent("agent_end", 12_000);
 		const text = collector.stop();
 		assert.match(text.toLowerCase(), /slowtool completed/);
 	});

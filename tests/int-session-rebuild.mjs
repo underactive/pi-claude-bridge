@@ -23,7 +23,7 @@
 //
 // Requires: ANTHROPIC_API_KEY or CC logged in.
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert";
 import { randomUUID } from "node:crypto";
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
@@ -33,6 +33,11 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 
 const CWD = process.cwd();
 const MODEL = "claude-haiku-4-5";
+const createdSessions = [];
+
+after(() => {
+	for (const sid of createdSessions) deleteSession(sid, CWD, process.env.CLAUDE_CONFIG_DIR);
+});
 
 async function drain(q) {
 	let out = "";
@@ -47,6 +52,7 @@ async function drain(q) {
 }
 
 function seedTextSession(sid, token) {
+	createdSessions.push(sid);
 	const s = createSession({
 		sessionId: sid,
 		projectPath: CWD,

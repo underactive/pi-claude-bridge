@@ -42,7 +42,7 @@ const harness = createRpcHarness({
 	defaultTimeout: TIMEOUT,
 });
 
-const { startAndWait, stop, send, addListener, collectText, DEBUG_LOG, RPC_LOG } = harness;
+const { startAndWait, stop, send, addListener, waitForMatch, collectText, DEBUG_LOG, RPC_LOG } = harness;
 
 let lastToolResult = null;
 
@@ -130,7 +130,10 @@ try {
   await send({ type: "prompt", message: "Write a detailed 500-word essay about the history of timekeeping." });
   // Set up idle listener before abort so we don't miss agent_end
   const idle5 = waitForIdle();
-  await new Promise((r) => setTimeout(r, 2000));
+  await waitForMatch(
+    (msg) => msg.type === "message_update" && msg.assistantMessageEvent?.type === "text_delta",
+    "text streaming before abort",
+  );
   await send({ type: "abort" });
   await idle5;
 

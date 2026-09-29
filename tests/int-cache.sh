@@ -14,6 +14,7 @@ source "$(dirname "$0")/lib/bash-setup.sh"
 echo "=== cache-test.sh ==="
 
 setup_test_env "cache-test" ".ndjson"
+require_command jq python3
 
 LOGFILE="$LOGDIR/cache-test.ndjson"
 

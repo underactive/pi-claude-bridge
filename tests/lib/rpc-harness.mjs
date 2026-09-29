@@ -56,6 +56,10 @@ export function createRpcHarness(opts) {
 		});
 
 		pi.stderr.on("data", (d) => rpcLog.write(d));
+		pi.stdin.on("error", () => {});
+		pi.on("close", (code, signal) => {
+			for (const fn of [...listeners]) fn({ type: "__closed", code, signal });
+		});
 
 		const decoder = new StringDecoder("utf8");
 		pi.stdout.on("data", (chunk) => {
@@ -74,9 +78,21 @@ export function createRpcHarness(opts) {
 		});
 	}
 
-	async function startAndWait(ms = 2000) {
+	async function startAndWait(ms = 30_000) {
 		start();
-		await new Promise((r) => setTimeout(r, ms));
+		const deadline = Date.now() + ms;
+		while (true) {
+			try {
+				await send({ type: "get_state" }, 1000);
+				return;
+			} catch (e) {
+				if (!e.message.startsWith("Timeout") || Date.now() >= deadline) throw e;
+			}
+		}
+	}
+
+	function closedError(msg, description) {
+		return new Error(`pi exited (code=${msg.code} signal=${msg.signal}) while waiting for ${description}`);
 	}
 
 	async function stop() {
@@ -102,8 +118,17 @@ export function createRpcHarness(opts) {
 		rpcLog.write(`> ${JSON.stringify(full)}\n`);
 		pi.stdin.write(JSON.stringify(full) + "\n");
 		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => reject(new Error(`Timeout: ${cmd.type}`)), timeout);
+			const timer = setTimeout(() => {
+				remove();
+				reject(new Error(`Timeout: ${cmd.type}`));
+			}, timeout);
 			const remove = addListener((msg) => {
+				if (msg.type === "__closed") {
+					clearTimeout(timer);
+					remove();
+					reject(closedError(msg, cmd.type));
+					return;
+				}
 				if (msg.type !== "response" || msg.id !== id) return;
 				clearTimeout(timer);
 				remove();
@@ -116,6 +141,12 @@ export function createRpcHarness(opts) {
 		return new Promise((resolve, reject) => {
 			const timer = setTimeout(() => reject(new Error(`Timeout waiting for ${type}`)), timeout);
 			const remove = addListener((msg) => {
+				if (msg.type === "__closed") {
+					clearTimeout(timer);
+					remove();
+					reject(closedError(msg, type));
+					return;
+				}
 				if (msg.type === type) {
 					clearTimeout(timer);
 					remove();
@@ -129,6 +160,12 @@ export function createRpcHarness(opts) {
 		return new Promise((resolve, reject) => {
 			const timer = setTimeout(() => reject(new Error(`Timeout waiting for ${description}`)), timeout);
 			const remove = addListener((msg) => {
+				if (msg.type === "__closed") {
+					clearTimeout(timer);
+					remove();
+					reject(closedError(msg, description));
+					return;
+				}
 				if (predicate(msg)) {
 					clearTimeout(timer);
 					remove();

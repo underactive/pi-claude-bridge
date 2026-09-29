@@ -63,8 +63,19 @@ setup_test_env() {
 
 # Kill all descendant processes (children, grandchildren, etc.).
 # Use as: trap kill_descendants EXIT
+kill_tree() {
+	local pid=$1 child
+	for child in $(pgrep -P "$pid" 2>/dev/null); do
+		kill_tree "$child"
+	done
+	kill "$pid" 2>/dev/null || true
+}
+
 kill_descendants() {
-	pkill -P $$ 2>/dev/null || true
+	local child
+	for child in $(pgrep -P $$ 2>/dev/null); do
+		kill_tree "$child"
+	done
 	sleep 1
 }
 

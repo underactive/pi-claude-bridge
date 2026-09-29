@@ -21,13 +21,14 @@ const RPIV_LOCATOR_FIXTURE = resolve(DIR, "tests/fixtures/rpiv-pi-v0.6.0-agents/
 const REENTRANT_MARKER = /provider: active query user-only call treated as reentrant fresh query/g;
 const STUCK_MARKER = /MCP handlers still waiting after delivering 0 results|tool handler\(s\) still waiting|currentPiStream overwritten/;
 
-assert.ok(existsSync(SUBAGENTS_DIR), `missing pinned pi-subagents checkout: ${SUBAGENTS_DIR}`);
-const subagentsPackage = JSON.parse(readFileSync(join(SUBAGENTS_DIR, "package.json"), "utf8"));
-assert.equal(
-	subagentsPackage.version,
-	"0.6.3",
-	`expected ../pi-subagents to be pinned at 0.6.3, got ${subagentsPackage.version}`,
-);
+const subagentsPackagePath = join(SUBAGENTS_DIR, "package.json");
+const subagentsVersion = existsSync(subagentsPackagePath)
+	? JSON.parse(readFileSync(subagentsPackagePath, "utf8")).version
+	: undefined;
+if (subagentsVersion !== "0.6.3") {
+	console.log(`SKIP: requires ../pi-subagents pinned at 0.6.3 (found ${subagentsVersion ?? "none"})`);
+	process.exit(0);
+}
 assert.ok(existsSync(RPIV_LOCATOR_FIXTURE), `missing rpiv codebase-locator fixture: ${RPIV_LOCATOR_FIXTURE}`);
 
 const testAgentDir = mkdtempSync(join(tmpdir(), "subagent-rpiv-locator-dir-"));
