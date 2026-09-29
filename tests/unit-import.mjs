@@ -182,6 +182,16 @@ describe("message structure", () => {
 		assert.equal(result[0].content[0].is_error, false);
 	});
 
+	it("toolResult keeps image blocks as base64 image content", () => {
+		const msgs = [
+			{ role: "toolResult", toolCallId: "id1", content: [{ type: "image", data: "AAAA", mimeType: "image/png" }], isError: false },
+		];
+		const result = convert(msgs);
+		assert.deepEqual(result[0].content[0].content, [
+			{ type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } },
+		]);
+	});
+
 	it("toolResult with isError=true", () => {
 		const msgs = [
 			{ role: "toolResult", toolCallId: "id1", content: "oh no", isError: true },

@@ -92,10 +92,22 @@ export function convertPiMessages(
 			if (!blocks.length) blocks.push({ type: "text", text: "[incompatible content omitted]" });
 			anthropicMessages.push({ role: "assistant", content: blocks });
 		} else if (msg.role === "toolResult") {
-			const text = typeof msg.content === "string" ? msg.content : messageContentToText(msg.content);
+			const hasImage = Array.isArray(msg.content) && msg.content.some((b) => b.type === "image" && b.data && b.mimeType);
+			let resultContent: string | ContentBlock[];
+			if (hasImage) {
+				resultContent = [];
+				for (const block of msg.content as Array<{ type: string; text?: string; data?: string; mimeType?: string }>) {
+					if (block.type === "text" && block.text) resultContent.push({ type: "text", text: block.text });
+					else if (block.type === "image" && block.data && block.mimeType) {
+						resultContent.push({ type: "image", source: { type: "base64", media_type: block.mimeType, data: block.data } });
+					}
+				}
+			} else {
+				resultContent = typeof msg.content === "string" ? msg.content : messageContentToText(msg.content);
+			}
 			anthropicMessages.push({
 				role: "user",
-				content: [{ type: "tool_result", tool_use_id: sanitizeToolId(msg.toolCallId, sanitizedIds), content: text || "", is_error: msg.isError }],
+				content: [{ type: "tool_result", tool_use_id: sanitizeToolId(msg.toolCallId, sanitizedIds), content: resultContent, is_error: msg.isError }],
 			});
 		}
 	}
