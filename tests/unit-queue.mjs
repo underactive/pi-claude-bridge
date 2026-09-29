@@ -9,7 +9,7 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { extractAllToolResults as _extractAllToolResults } from "../src/extract-tool-results.js";
+import { extractAllToolResults as _extractAllToolResults, toolResultToMcpContent } from "../src/extract-tool-results.js";
 
 // Test wrapper: real extract returns { results, stopIdx }; tests only want results.
 // Also unwraps converted content so assertions can check the original string.
@@ -262,6 +262,14 @@ describe("extractAllToolResults boundaries", () => {
 		const results = extractAllToolResults(messages);
 		assert.equal(results.length, 1, `expected 1 result (current turn), got ${results.length}`);
 		assert.equal(results[0].content, "grep-result-NEW");
+		assert.equal(_extractAllToolResults(messages).stopIdx, 4);
+	});
+
+	it("no assistant message: stopIdx is -1", async () => {
+		const messages = [
+			{ role: "toolResult", toolCallId: "t1", content: "orphan" },
+		];
+		assert.equal(_extractAllToolResults(messages).stopIdx, -1);
 	});
 
 	it("three turns: only last turn's results", async () => {
@@ -279,6 +287,44 @@ describe("extractAllToolResults boundaries", () => {
 		assert.equal(results.length, 2);
 		assert.equal(results[0].content, "turn3a");
 		assert.equal(results[1].content, "turn3b");
+	});
+});
+
+describe("toolResultToMcpContent", () => {
+	const empty = [{ type: "text", text: "" }];
+
+	it("string input becomes a single text block", () => {
+		assert.deepEqual(toolResultToMcpContent("hi"), [{ type: "text", text: "hi" }]);
+	});
+
+	it("empty string, empty array, and undefined collapse to an empty text block", () => {
+		assert.deepEqual(toolResultToMcpContent(""), empty);
+		assert.deepEqual(toolResultToMcpContent([]), empty);
+		assert.deepEqual(toolResultToMcpContent(undefined), empty);
+	});
+
+	it("image blocks are forwarded with data and mimeType", () => {
+		assert.deepEqual(
+			toolResultToMcpContent([{ type: "image", data: "x", mimeType: "image/png" }]),
+			[{ type: "image", data: "x", mimeType: "image/png" }],
+		);
+	});
+
+	it("image blocks missing data are dropped", () => {
+		assert.deepEqual(toolResultToMcpContent([{ type: "image", mimeType: "image/png" }]), empty);
+	});
+
+	it("mixed text and image arrays preserve order", () => {
+		assert.deepEqual(
+			toolResultToMcpContent([
+				{ type: "text", text: "a" },
+				{ type: "image", data: "x", mimeType: "image/png" },
+			]),
+			[
+				{ type: "text", text: "a" },
+				{ type: "image", data: "x", mimeType: "image/png" },
+			],
+		);
 	});
 });
 
