@@ -305,7 +305,7 @@ function extractUserPrompt(messages: Message[]): string | null {
 	return turn
 		.map((message) => typeof message.content === "string" ? message.content : messageContentToText(message.content))
 		.filter((text) => text)
-		.join("\n");
+		.join("\n\n");
 }
 
 /** Extract the current user turn as ContentBlockParam[] (preserving images).
@@ -1271,7 +1271,7 @@ function streamClaudeAgentSdk(model: Model<any>, context: TranscriptContext, opt
 		if (lastMsgRole === "user") {
 			const userPrompt = extractUserPrompt(context.messages);
 			if (userPrompt) {
-				resultCtx.deferredUserMessages.push(userPrompt);
+				resultCtx.deferredUserMessages.push(extractUserPromptBlocks(context.messages) ?? [{ type: "text", text: userPrompt }]);
 				debug(`provider: deferred user message for replay after query: ${userPrompt.slice(0, 60)}`);
 			}
 		}
@@ -1473,8 +1473,8 @@ function streamClaudeAgentSdk(model: Model<any>, context: TranscriptContext, opt
 			// --- Replay deferred user messages as continuation queries ---
 			try {
 				while (queryCtx.deferredUserMessages.length > 0 && !isReentrant && !wasAborted) {
-					const steerPrompt = queryCtx.deferredUserMessages.shift()!;
-					debug(`provider: replaying deferred user message: ${steerPrompt.slice(0, 60)}`);
+					const steerBlocks = queryCtx.deferredUserMessages.shift()!;
+					debug(`provider: replaying deferred user message: ${steerBlocks.length} blocks`);
 					queryCtx.resetTurnState(model);
 
 					const resumeId = sharedSession?.sessionId;
@@ -1484,11 +1484,11 @@ function streamClaudeAgentSdk(model: Model<any>, context: TranscriptContext, opt
 					}
 
 					const contOptions = { ...queryOptions, resume: resumeId, ...makeCliDebugOptions("continuation") };
-					const contQuery = query({ prompt: steerPrompt, options: contOptions });
+					const contQuery = query({ prompt: wrapPromptStream(steerBlocks), options: contOptions });
 					queryCtx.activeQuery = contQuery;
 					queryCtx.queryCostEstimate = 0;
 
-					debug(`provider: continuation query, model=${cliModel}, resume=${resumeId.slice(0, 8)}, prompt=${steerPrompt.slice(0, 60)}`);
+					debug(`provider: continuation query, model=${cliModel}, resume=${resumeId.slice(0, 8)}, blocks=${steerBlocks.length}`);
 
 					try {
 						const { capturedSessionId: contSid } = await consumeQuery(contQuery, customToolNameToPi, model, () => wasAborted, queryCtx);

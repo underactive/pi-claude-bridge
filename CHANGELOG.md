@@ -2,6 +2,8 @@
 
 ## UNRELEASED
 
+- **Fix: steer/followUp replay keeps images and message boundaries** — deferred user messages are stored as content blocks and replayed through the prompt stream, so attached images survive; multiple user messages in one turn are joined with a blank line.
+
 - **Fix: stop mangling AGENTS.md when forwarding to Claude Code** — sanitization no longer rewrites every bare word `pi` to `environment` or every `.pi` suffix; only `~/.pi`, `.pi/`, and standalone `.pi` path tokens are rewritten to `.claude`.
 
 - **Tests: unit coverage for the SDK-to-pi stream state machine** — `processStreamEvent`, `processAssistantMessage`, `consumeQuery`, and `updateUsage` are exposed via `__test` and exercised with scripted SDK messages (tool_use turn ending, result error subtypes, usage mapping, `cacheWrite1h` clamp, thinking signature accumulation) without a live subscription.

@@ -7,6 +7,7 @@
 //
 // Extracted from index.ts so tests can import without activating the extension.
 
+import type { ContentBlockParam } from "@anthropic-ai/sdk/resources";
 import type { AssistantMessage, AssistantMessageEventStream, Model } from "@earendil-works/pi-ai";
 import type { McpResult } from "./extract-tool-results.js";
 
@@ -34,7 +35,7 @@ export class QueryContext {
 	pendingResults = new Map<string, McpResult>();
 	turnToolCallIds: string[] = [];
 	nextHandlerIdx = 0;
-	deferredUserMessages: string[] = [];
+	deferredUserMessages: ContentBlockParam[][] = [];
 	// Running sum of finalized turn costs (usage.cost.total). Debug-only: compared
 	// against the SDK's own total_cost_usd in the result cross-check log.
 	queryCostEstimate = 0;
