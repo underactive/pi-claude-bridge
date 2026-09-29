@@ -1271,7 +1271,7 @@ function streamClaudeAgentSdk(model: Model<any>, context: TranscriptContext, opt
 			}
 		}
 
-		if (sharedSession) sharedSession.cursor = conversationCount;
+		if (sharedSession && resultCtx === ctx()) sharedSession.cursor = conversationCount;
 		resultCtx.latestCursor = Math.max(resultCtx.latestCursor, conversationCount);
 		return stream;
 	}
