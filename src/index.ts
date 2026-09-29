@@ -962,6 +962,25 @@ function finalizeCurrentStream(c: QueryContext, stopReason?: string): void {
 	c.currentPiStream = null;
 }
 
+function endStreamForToolUse(c: QueryContext): void {
+	const stream = c.currentPiStream;
+	if (!stream || !c.turnOutput) return;
+	c.turnOutput.stopReason = "toolUse";
+	c.queryCostEstimate += c.turnOutput.usage.cost.total;
+	stream.push({ type: "done", reason: "toolUse", message: c.turnOutput });
+	markStreamComplete(stream);
+	stream.end();
+	c.currentPiStream = null;
+}
+
+function failCurrentStream(c: QueryContext, reason: "aborted" | "error"): void {
+	const stream = c.currentPiStream;
+	stream?.push({ type: "error", reason, error: c.turnOutput! });
+	markStreamComplete(stream);
+	stream?.end();
+	c.currentPiStream = null;
+}
+
 /** Maps Anthropic stream events to pi stream events (text, thinking, toolcall).
  *  On message_stop with tool_use: ends currentPiStream so pi can execute the tool. */
 function processStreamEvent(
@@ -1058,13 +1077,7 @@ function processStreamEvent(
 		// assistant message for this turn, but currentPiStream=null causes
 		// consumeQuery to skip it. The MCP handler blocks the generator until
 		// pi delivers the tool result via the next streamSimple call.
-		c.turnOutput.stopReason = "toolUse";
-		const stream = c.currentPiStream;
-		c.queryCostEstimate += c.turnOutput.usage.cost.total;
-		stream!.push({ type: "done", reason: "toolUse", message: c.turnOutput });
-		markStreamComplete(stream);
-		stream!.end();
-		c.currentPiStream = null;
+		endStreamForToolUse(c);
 
 		// Cursor is updated by the next streamSimple call (tool result delivery path)
 		// which records the post-tool-result conversational message count.
@@ -1125,15 +1138,7 @@ function processAssistantMessage(message: SDKMessage, model: Model<any>, customT
 	if (assistantMsg.usage && c.turnOutput) updateUsage(c.turnOutput, assistantMsg.usage, model);
 
 	// End the stream on tool_use, same as processStreamEvent's message_stop handler.
-	if (c.turnSawToolCall && c.currentPiStream && c.turnOutput) {
-		c.turnOutput.stopReason = "toolUse";
-		const stream = c.currentPiStream;
-		c.queryCostEstimate += c.turnOutput.usage.cost.total;
-		stream.push({ type: "done", reason: "toolUse", message: c.turnOutput });
-		markStreamComplete(stream);
-		stream.end();
-		c.currentPiStream = null;
-	}
+	if (c.turnSawToolCall) endStreamForToolUse(c);
 }
 
 /** Background consumer: iterates the SDK generator, pushing events to currentPiStream.
@@ -1461,11 +1466,7 @@ function streamClaudeAgentSdk(model: Model<any>, context: TranscriptContext, opt
 					queryCtx.turnOutput.stopReason = "aborted";
 					queryCtx.turnOutput.errorMessage = "Operation aborted";
 				}
-				const stream = queryCtx.currentPiStream;
-				stream?.push({ type: "error", reason: "aborted", error: queryCtx.turnOutput! });
-				markStreamComplete(stream);
-				stream?.end();
-				queryCtx.currentPiStream = null;
+				failCurrentStream(queryCtx, "aborted");
 				return;
 			}
 
@@ -1547,11 +1548,7 @@ function streamClaudeAgentSdk(model: Model<any>, context: TranscriptContext, opt
 				debug("provider: clearing activeQuery before error stream completion");
 				queryCtx.activeQuery = null;
 			}
-			const stream = queryCtx.currentPiStream;
-			stream?.push({ type: "error", reason: (queryCtx.turnOutput?.stopReason ?? "error") as "aborted" | "error", error: queryCtx.turnOutput! });
-			markStreamComplete(stream);
-			stream?.end();
-			queryCtx.currentPiStream = null;
+			failCurrentStream(queryCtx, (queryCtx.turnOutput?.stopReason ?? "error") as "aborted" | "error");
 		})
 		.finally(() => {
 			if (options?.signal) options.signal.removeEventListener("abort", onAbort);
