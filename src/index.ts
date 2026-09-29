@@ -1607,7 +1607,7 @@ async function promptAndWait(
 	}
 
 	// Mode → disallowed tools
-	const modeDisallowed = MODE_DISALLOWED_TOOLS[mode] ?? [];
+	const modeDisallowed = MODE_DISALLOWED_TOOLS[mode] ?? MODE_DISALLOWED_TOOLS.read;
 	const disallowedTools = mode === "read" && options?.allowNetwork
 		? modeDisallowed.filter((t) => t !== "WebFetch" && t !== "WebSearch")
 		: modeDisallowed;
@@ -1881,11 +1881,11 @@ export default function (pi: ExtensionAPI) {
 
 	const askConf = config.askClaude;
 	const allowFull = askConf?.allowFullMode !== false;
-	const defaultMode = askConf?.defaultMode ?? "read";
 	const defaultIsolated = askConf?.defaultIsolated ?? false;
 	askClaudeToolName = askConf?.name ?? "AskClaude";
 
 	const modeValues = allowFull ? ["read", "full", "none"] as const : ["read", "none"] as const;
+	const defaultMode = modeValues.find((m) => m === askConf?.defaultMode) ?? "read";
 	let modeDesc = `"read" (default): questions about the codebase — review, analysis, explain. "none": general knowledge only (no file access).`;
 	if (allowFull) modeDesc += ` "full": allows writing and bash execution (careful: runs without feedback to pi).`;
 
