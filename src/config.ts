@@ -49,6 +49,7 @@ export function tryParseJson(path: string): Partial<Config> {
 }
 
 const GLOBAL_ONLY_PROVIDER_KEYS = ["pathToClaudeCodeExecutable", "strictMcpConfig", "settingSources", "plan", "longContextExtraUsage"] as const;
+const GLOBAL_ONLY_ASKCLAUDE_KEYS = ["enabled", "name", "description", "defaultMode", "allowFullMode"] as const;
 
 export function loadConfig(cwd: string): Config {
 	const global = tryParseJson(join(homedir(), ".pi", "agent", "claude-bridge.json"));
@@ -59,8 +60,13 @@ export function loadConfig(cwd: string): Config {
 		if (global.provider?.[key] !== undefined) provider[key] = global.provider[key] as never;
 		else delete provider[key];
 	}
+	const askClaude = { ...global.askClaude, ...project.askClaude };
+	for (const key of GLOBAL_ONLY_ASKCLAUDE_KEYS) {
+		if (global.askClaude?.[key] !== undefined) askClaude[key] = global.askClaude[key] as never;
+		else delete askClaude[key];
+	}
 	return {
-		askClaude: { ...global.askClaude, ...project.askClaude },
+		askClaude,
 		provider,
 	};
 }

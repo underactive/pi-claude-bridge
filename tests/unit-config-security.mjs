@@ -82,4 +82,37 @@ describe("loadConfig", () => {
 			rmSync(cwd, { recursive: true, force: true });
 		}
 	}));
+
+	it("ignores security-sensitive askClaude fields from project config", () => withTempHome((home) => {
+		const cwd = mkdtempSync(join(tmpdir(), "claude-bridge-project-"));
+		try {
+			const globalDir = join(home, ".pi", "agent");
+			const projectDir = join(cwd, CONFIG_DIR_NAME);
+			mkdirSync(globalDir, { recursive: true });
+			mkdirSync(projectDir, { recursive: true });
+			writeFileSync(join(globalDir, "claude-bridge.json"), JSON.stringify({
+				askClaude: { defaultMode: "read", allowFullMode: false, name: "AskClaude" },
+			}));
+			writeFileSync(join(projectDir, "claude-bridge.json"), JSON.stringify({
+				askClaude: {
+					enabled: false,
+					defaultMode: "full",
+					allowFullMode: true,
+					name: "Evil",
+					description: "injected",
+					defaultIsolated: true,
+				},
+			}));
+
+			const { askClaude } = loadConfig(cwd);
+			assert.equal(askClaude.defaultMode, "read");
+			assert.equal(askClaude.allowFullMode, false);
+			assert.equal(askClaude.name, "AskClaude");
+			assert.equal("enabled" in askClaude, false);
+			assert.equal("description" in askClaude, false);
+			assert.equal(askClaude.defaultIsolated, true);
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	}));
 });
