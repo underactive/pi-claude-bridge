@@ -23,13 +23,13 @@ pi install npm:pi-claude-bridge
 
 ## Provider
 
-Use `/model` to select `claude-bridge/claude-fable-5-1`, `claude-bridge/claude-fable-5`, `claude-bridge/claude-opus-5-5`, `claude-bridge/claude-opus-5`, `claude-bridge/claude-opus-4-8`, `claude-bridge/claude-opus-4-7`, `claude-bridge/claude-opus-4-6`, `claude-bridge/claude-sonnet-5`, `claude-bridge/claude-sonnet-4-6`, or `claude-bridge/claude-haiku-4-5`. The `fable` shortcut resolves to `claude-fable-5-1`; the `opus` shortcut resolves to `claude-opus-5-5`.
+Use `/model` to select `claude-bridge/claude-fable-5-1`, `claude-bridge/claude-fable-5`, `claude-bridge/claude-opus-5-5`, `claude-bridge/claude-opus-5`, `claude-bridge/claude-opus-4-8`, `claude-bridge/claude-opus-4-7`, `claude-bridge/claude-opus-4-6`, `claude-bridge/claude-sonnet-5-5`, `claude-bridge/claude-sonnet-5`, `claude-bridge/claude-sonnet-4-6`, or `claude-bridge/claude-haiku-4-5`. The `fable` shortcut resolves to `claude-fable-5-1`; the `opus` shortcut resolves to `claude-opus-5-5`; the `sonnet` shortcut resolves to `claude-sonnet-5-5`.
 
 Behind the scenes, pi's tools are bridged to Claude Code but it should all work like normal in pi. Bash commands get a 120-second default timeout (matching Claude Code's default) since pi's bash has no timeout by default. Skills in pi are copied over to Claude Code's system prompt so should work as they would with any other pi provider.
 
 **Cost display:** the cost pi shows for claude-bridge models is an API-equivalent estimate computed from catalog list prices and reported token counts — useful for gauging usage intensity. Claude Code usage is billed against your subscription, so this figure is neither a charge nor a quota measurement.
 
-**1M Context:** Fable 5.1, Fable 5, Opus 5.5, Opus 5, Opus 4.8, and Opus 4.7 get 1M context by default. Opus 4.6 only gets 1M if you're on a Max plan or pay for Extra Usage. Sonnet 4.6 only gets 1M if you pay for Extra Usage. You will need to set `provider.plan` and/or `provider.longContextExtraUsage` for 1M context in Opus 4.6/Sonnet 4.6 as described in [Configuration](#configuration).
+**1M Context:** Fable 5.1, Fable 5, Opus 5.5, Opus 5, Opus 4.8, Opus 4.7, Sonnet 5.5, and Sonnet 5 get 1M context by default. Opus 4.6 only gets 1M if you're on a Max plan or pay for Extra Usage. Sonnet 4.6 only gets 1M if you pay for Extra Usage. You will need to set `provider.plan` and/or `provider.longContextExtraUsage` for 1M context in Opus 4.6/Sonnet 4.6 as described in [Configuration](#configuration).
 
 ## AskClaude Tool
 

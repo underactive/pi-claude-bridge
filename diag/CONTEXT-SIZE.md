@@ -18,10 +18,10 @@ Raw JSON + MD per run save to `.test-output/context-size/` (gitignored).
 
 ## Environment
 
-- Claude Agent SDK `@anthropic-ai/claude-agent-sdk` 0.2.141 (bundled Claude Code 2.1.141)
+- Claude Agent SDK `@anthropic-ai/claude-agent-sdk` 0.3.280 (bundled Claude Code 2.1.280)
 - Auth: subscription OAuth (claude.ai), `ANTHROPIC_API_KEY` unset
 - Options: `settingSources: []`, `tools: []`, `maxTurns: 1`, `persistSession: false`
-- Date: 2026-06-26
+- Latest run: 2026-09-29
 
 ## Served context windows
 
@@ -46,6 +46,8 @@ the footnote below the table).
 | `claude-fable-5-1[1m]`   | —                | —               | —                | —               |
 | `claude-fable-5`          | 200K             | —               | —                | —               |
 | `claude-fable-5[1m]`     | 1M               | —               | —                | —               |
+| `claude-sonnet-5-5`         | 200K             | —               | —                | —               |
+| `claude-sonnet-5-5[1m]`    | 1M               | —               | —                | —               |
 | `claude-sonnet-5`         | 200K             | —               | —                | —               |
 | `claude-sonnet-5[1m]`    | 1M               | —               | —                | —               |
 | `claude-sonnet-4-6`       | 200K             | 200K            | 200K             | 200K            |
@@ -53,7 +55,7 @@ the footnote below the table).
 | `claude-haiku-4-5`        | 200K             | 200K            | 200K             | 200K            |
 | `claude-haiku-4-5[1m]`   | 429†             | 400             | 400              | 400             |
 
-Raw runs: `.test-output/context-size/{pro,max}-2026-06-26T21-*.json`
+Raw runs: `.test-output/context-size/{pro,max}-2026-06-26T21-*.json`, `.test-output/context-size/pro-2026-09-29T01-16-37-024Z.json`
 
 `—` = not yet tested in that condition. Max-credits-on matched Pro-credits-on
 for every cell tested in both (shown for completeness).
