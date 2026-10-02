@@ -133,20 +133,54 @@ const DEFAULT_MAX_TURNS = 50;
 // pi.dev remote-catalog overlay before pi-ai's bundled catalog carries them.
 // getModels() reads only the static catalog, so read the same overlay pi
 // persists (agentDir/models-store.json) and fill in the anthropic entries the
-// static catalog is missing. Best-effort: any read/parse failure yields [].
+// static catalog is missing. Best-effort: a read/parse/shape failure yields [] —
+// but unlike a first run (no store file yet) those failures are reported, since
+// they silently degrade the model list to pi-ai's static catalog alone.
 function readOverlayAnthropicModels(): Array<{ id: string }> {
+	const path = join(getAgentDir(), "models-store.json");
+	let raw: string;
 	try {
-		const raw = readFileSync(join(getAgentDir(), "models-store.json"), "utf8");
-		const entry = (JSON.parse(raw) as Record<string, { models?: unknown }>)?.anthropic;
-		const models = Array.isArray(entry?.models) ? entry.models : [];
-		return models.filter((m: unknown): m is { id: string } => !!m && typeof (m as { id?: unknown }).id === "string");
-	} catch {
+		raw = readFileSync(path, "utf8");
+	} catch (error) {
+		if ((error as { code?: unknown }).code !== "ENOENT") diagDump("overlay_read_fail", { path, err: errorMessage(error) });
 		return [];
 	}
+	let entry: { models?: unknown } | undefined;
+	try {
+		entry = (JSON.parse(raw) as Record<string, { models?: unknown }>).anthropic;
+	} catch (error) {
+		diagDump("overlay_parse_fail", { path, err: errorMessage(error) });
+		return [];
+	}
+	// An empty list is a legitimate "not fetched yet"; a non-array is a shape we
+	// cannot read, and treating it as empty is what hides the model in the first place.
+	if (!Array.isArray(entry?.models)) {
+		diagDump("overlay_shape_unexpected", { path });
+		return [];
+	}
+	return entry.models.filter((m: unknown): m is { id: string } => !!m && typeof (m as { id?: unknown }).id === "string");
 }
 
-// MODELS is buildModels(getModels("anthropic") + overlay) — projection kept in models.js.
-const MODELS = buildModels(mergeOverlayModels<any>(getModels("anthropic"), readOverlayAnthropicModels()));
+// A model declared in MODEL_IDS_IN_ORDER but absent from both catalogs is never
+// registered: /model cannot select it, and any client routed to it 404s. Say so
+// loudly at load time rather than letting the absence surface as a routing failure.
+function reportMissingModels(ids: string[]): void {
+	diagDump("model_not_in_catalog", { ids });
+	console.error(
+		`claude-bridge: not registered — absent from the pi-ai catalog and the remote-catalog overlay: ${ids.join(", ")}`,
+	);
+}
+
+function loadModels() {
+	// MODELS is buildModels(getModels("anthropic") + overlay) — projection kept in models.js.
+	return buildModels(mergeOverlayModels<any>(getModels("anthropic"), readOverlayAnthropicModels()), reportMissingModels);
+}
+
+// Mutable so a session_start can pick up an overlay pi refreshed after module load.
+// Only the instance that performed the provider registration may re-register it —
+// a subagent instance would clobber the parent's streamSimple (see ACTIVE_STREAM_SIMPLE_KEY).
+let MODELS = loadModels();
+let ownsProviderRegistration = false;
 let providerSettings: NonNullable<Config["provider"]> = {};
 let longContextSettings: LongContextSettings = { plan: "pro", longContextExtraUsage: false };
 
@@ -1757,11 +1791,49 @@ export default function (pi: ExtensionAPI) {
 			g[ACTIVE_STREAM_SIMPLE_KEY] = undefined;
 		}
 	};
+	// pi refreshes models-store.json in the background, so a model that could not be
+	// registered at module load can become available later. Re-read on every session
+	// start and re-register only when the id set actually changed, so a catalog that
+	// arrives late is not pinned out until the process restarts. The subagent instance
+	// that skipped registration still refreshes MODELS for its own resolveModel calls.
+	const refreshModels = (): void => {
+		const next = loadModels();
+		const before = MODELS.map((m) => m.id);
+		const after = next.map((m) => m.id);
+		if (before.join() === after.join()) return;
+		MODELS = next;
+		const added = after.filter((id) => !before.includes(id));
+		const removed = before.filter((id) => !after.includes(id));
+		diagDump("models_refreshed", { added, removed });
+		debug(`models: refreshed added=[${added.join(",")}] removed=[${removed.join(",")}]`);
+		piUI?.notify?.(
+			`Claude bridge model list updated: ${added.length > 0 ? `added ${added.join(", ")}` : ""}${added.length > 0 && removed.length > 0 ? "; " : ""}${removed.length > 0 ? `removed ${removed.join(", ")}` : ""}`,
+			"info",
+		);
+		// Re-register only while this instance still owns the active streamSimple. A
+		// /reload hands that key to the new instance, so a stale instance refreshing
+		// afterwards would otherwise clobber the live registration.
+		const stillActiveOwner = (globalThis as Record<symbol, any>)[ACTIVE_STREAM_SIMPLE_KEY] === streamClaudeAgentSdk;
+		if (!ownsProviderRegistration || !stillActiveOwner) {
+			debug(`models: refreshed but not re-registering (ownsRegistration=${ownsProviderRegistration} activeOwner=${stillActiveOwner})`);
+			return;
+		}
+		pi.registerProvider(PROVIDER_ID, {
+			baseUrl: "claude-bridge",
+			apiKey: "not-used",
+			api: "claude-bridge",
+			models: applyLongContext(MODELS, longContextSettings),
+			// Cast: pi-ai AssistantMessageEventStream diamond dep between pi-coding-agent and pi-agent-core
+			streamSimple: streamClaudeAgentSdk as any,
+		});
+	};
+
 	pi.on("session_start", (event, ctx) => {
 		piUI = ctx.ui;
 		if (event.reason === "new" || event.reason === "resume" || event.reason === "fork") {
 			clearSession(`session_start:${event.reason}`);
 		}
+		refreshModels();
 	});
 	pi.on("session_shutdown", () => clearSession("session_shutdown"));
 
@@ -1826,6 +1898,7 @@ export default function (pi: ExtensionAPI) {
 	if (!g[ACTIVE_STREAM_SIMPLE_KEY]) {
 		// First instance: store our streamSimple and register.
 		g[ACTIVE_STREAM_SIMPLE_KEY] = streamClaudeAgentSdk;
+		ownsProviderRegistration = true;
 		pi.registerProvider(PROVIDER_ID, {
 			baseUrl: "claude-bridge",
 			apiKey: "not-used",

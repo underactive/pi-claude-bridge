@@ -16,7 +16,9 @@ const DEFAULT_THINKING_LEVEL_MAPS: Record<string, Record<string, string>> = {
 };
 
 // Project pi-ai's model entries down to the fields pi's registerProvider expects,
-// and keep MODEL_IDS_IN_ORDER ordering. IDs missing from pi-ai are silently dropped.
+// and keep MODEL_IDS_IN_ORDER ordering. An ID missing from both the pi-ai catalog and
+// the remote-catalog overlay is dropped, and the drop is reported to `onMissing` so a
+// declared-but-unregistered model cannot look like a downstream routing bug.
 // Context-dependent display labels are applied after plan/long-context config is known.
 //
 // Cost: Anthropic API list pricing is forwarded from the catalog for display, so
@@ -28,7 +30,12 @@ const DEFAULT_THINKING_LEVEL_MAPS: Record<string, Record<string, string>> = {
 // overlay entries are parsed JSON validated only for `id`.
 const rate = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 
-export function buildModels<T extends { id: string; [key: string]: any }>(piAiModels: T[]) {
+export function buildModels<T extends { id: string; [key: string]: any }>(
+	piAiModels: T[],
+	onMissing?: (ids: string[]) => void,
+) {
+	const missing = MODEL_IDS_IN_ORDER.filter((id) => !piAiModels.some((m) => m.id === id));
+	if (missing.length > 0) onMissing?.(missing);
 	return MODEL_IDS_IN_ORDER
 		.map((id) => piAiModels.find((m) => m.id === id))
 		.filter((m) => m != null)

@@ -45,10 +45,24 @@ describe("MODELS projection", () => {
 		assert.deepEqual(models.map((m) => m.id), MODEL_IDS_IN_ORDER);
 	});
 
-	it("silently drops IDs missing from pi-ai (no fallback)", () => {
-		// Only haiku present — opus/sonnet vanish from picker.
-		const models = buildModels([mockPiAiModel("claude-haiku-4-5")]);
+	it("drops IDs missing from pi-ai (no fallback) and reports them via onMissing", () => {
+		// Only haiku present — opus/sonnet vanish from picker, but the absence is
+		// reported so a declared-but-unregistered model is not mistaken for a routing bug.
+		const missing = [];
+		const models = buildModels([mockPiAiModel("claude-haiku-4-5")], (ids) => missing.push(...ids));
 		assert.deepEqual(models.map((m) => m.id), ["claude-haiku-4-5"]);
+		assert.deepEqual(missing, MODEL_IDS_IN_ORDER.filter((id) => id !== "claude-haiku-4-5"));
+	});
+
+	it("does not call onMissing when every declared ID is present", () => {
+		let calls = 0;
+		buildModels(MODEL_IDS_IN_ORDER.map(mockPiAiModel), () => { calls++; });
+		assert.equal(calls, 0);
+	});
+
+	it("omits onMissing entirely when a caller passes none", () => {
+		// Regression guard: the callback is optional and must not be required by callers.
+		assert.deepEqual(buildModels([mockPiAiModel("claude-haiku-4-5")]).map((m) => m.id), ["claude-haiku-4-5"]);
 	});
 
 	it("forwards pi-ai list pricing", () => {
