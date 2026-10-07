@@ -120,6 +120,7 @@ describe("MODELS projection", () => {
 
 	it("haiku gets no default thinkingLevelMap (no effort support)", () => {
 		const models = buildModels(MODEL_IDS_IN_ORDER.map(mockPiAiModel));
+		assert.equal(find(models, "claude-haiku-5-5")?.thinkingLevelMap, undefined);
 		assert.equal(find(models, "claude-haiku-4-5")?.thinkingLevelMap, undefined);
 	});
 	describe("cost calculation", () => {
@@ -186,6 +187,7 @@ describe("Claude Code runtime model policy", () => {
 		assert.deepEqual(resolveClaudeCodeRuntimeModel("claude-opus-4-6", PRO), { cliModelId: "claude-opus-4-6", contextWindow: 200000 });
 		assert.deepEqual(resolveClaudeCodeRuntimeModel("claude-sonnet-5-5", PRO), { cliModelId: "claude-sonnet-5-5[1m]", contextWindow: 1000000 });
 		assert.deepEqual(resolveClaudeCodeRuntimeModel("claude-sonnet-4-6", PRO), { cliModelId: "claude-sonnet-4-6", contextWindow: 200000 });
+		assert.deepEqual(resolveClaudeCodeRuntimeModel("claude-haiku-5-5", PRO), { cliModelId: "claude-haiku-5-5", contextWindow: 200000 });
 		assert.deepEqual(resolveClaudeCodeRuntimeModel("claude-haiku-4-5", PRO), { cliModelId: "claude-haiku-4-5", contextWindow: 200000 });
 	});
 
@@ -202,6 +204,7 @@ describe("Claude Code runtime model policy", () => {
 		assert.deepEqual(resolveClaudeCodeRuntimeModel("claude-sonnet-5-5", EXTRA), { cliModelId: "claude-sonnet-5-5[1m]", contextWindow: 1000000 });
 		assert.deepEqual(resolveClaudeCodeRuntimeModel("claude-opus-4-6", EXTRA), { cliModelId: "claude-opus-4-6[1m]", contextWindow: 1000000 });
 		assert.deepEqual(resolveClaudeCodeRuntimeModel("claude-sonnet-4-6", EXTRA), { cliModelId: "claude-sonnet-4-6[1m]", contextWindow: 1000000 });
+		assert.deepEqual(resolveClaudeCodeRuntimeModel("claude-haiku-5-5", EXTRA), { cliModelId: "claude-haiku-5-5", contextWindow: 200000 });
 		assert.deepEqual(resolveClaudeCodeRuntimeModel("claude-haiku-4-5", EXTRA), { cliModelId: "claude-haiku-4-5", contextWindow: 200000 });
 	});
 
@@ -222,6 +225,7 @@ describe("claudeCodeModelId", () => {
 		assert.equal(claudeCodeModelId(find(models, "claude-opus-4-6"), MAX), "claude-opus-4-6[1m]");
 		assert.equal(claudeCodeModelId(find(models, "claude-sonnet-5-5"), PRO), "claude-sonnet-5-5[1m]");
 		assert.equal(claudeCodeModelId(find(models, "claude-sonnet-4-6"), EXTRA), "claude-sonnet-4-6[1m]");
+		assert.equal(claudeCodeModelId(find(models, "claude-haiku-5-5"), EXTRA), "claude-haiku-5-5");
 		assert.equal(claudeCodeModelId(find(models, "claude-haiku-4-5"), EXTRA), "claude-haiku-4-5");
 	});
 
@@ -238,6 +242,7 @@ describe("applyLongContext", () => {
 		assert.equal(find(registered, "claude-opus-4-6").contextWindow, 200000);
 		assert.equal(find(registered, "claude-sonnet-5-5").contextWindow, 1000000);
 		assert.equal(find(registered, "claude-sonnet-4-6").contextWindow, 200000);
+		assert.equal(find(registered, "claude-haiku-5-5").contextWindow, 200000);
 		assert.equal(find(registered, "claude-haiku-4-5").contextWindow, 200000);
 		// Does not mutate the source table used for id resolution.
 		assert.equal(find(models, "claude-opus-4-6").contextWindow, 1000000);
@@ -315,8 +320,12 @@ describe("resolveModel", () => {
 		assert.equal(resolveModel(models, "claude-sonnet-5")?.id, "claude-sonnet-5");
 	});
 
-	it("haiku shortcut resolves to claude-haiku-4-5", () => {
-		assert.equal(resolveModel(models, "haiku")?.id, "claude-haiku-4-5");
+	it("haiku shortcut resolves to claude-haiku-5-5 (latest Haiku in order)", () => {
+		assert.equal(resolveModel(models, "haiku")?.id, "claude-haiku-5-5");
+	});
+
+	it("full Haiku 4.5 ID resolves exactly despite the shared prefix", () => {
+		assert.equal(resolveModel(models, "claude-haiku-4-5")?.id, "claude-haiku-4-5");
 	});
 
 	it("full ID resolves to itself", () => {

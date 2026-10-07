@@ -2,6 +2,10 @@
 
 ## UNRELEASED
 
+- **Add: claude-haiku-5-5 model** — Anthropic's Claude Haiku 5.5 is now selectable via `/model`, and the `haiku` shortcut resolves to it (use the explicit `claude-haiku-4-5` ID to pin Haiku 4.5). Registers at 200K and requests bare `claude-haiku-5-5` (same Haiku policy as 4.5; context not yet probed via `diag/context-size.mjs`). Metadata is filled from pi's remote-catalog overlay cache (`agentDir/models-store.json`) since pi-ai's bundled catalog doesn't carry it yet.
+
+- **Bump: Claude Agent SDK to 0.3.293** — pins Claude Code 2.1.293 so `claude-haiku-5-5` is supported by the bundled CLI (older pinned builds reject models added after their release, same as Opus 5.5 on 2.1.258).
+
 - **Fix: report and recover models missing from the catalogs** — a model listed in `MODEL_IDS_IN_ORDER` but absent from both pi-ai's bundled catalog and the remote-catalog overlay was dropped from the provider with no diagnostic, so `/model` could not select it and any client routed to it failed with `unknown or unavailable model` (e.g. `claude-sonnet-5-5` before the overlay cache caught up). `buildModels` now takes an optional `onMissing` callback that receives the dropped IDs, and the bridge logs them to `claude-bridge-diag.log` (`model_not_in_catalog`) and stderr at load time. Overlay read, JSON-parse, and unexpected-shape failures are likewise reported (`overlay_read_fail`, `overlay_parse_fail`, `overlay_shape_unexpected`) instead of degrading silently to pi-ai's static catalog; a first run with no store file is still treated as normal. The model list is re-read on every `session_start` and the provider is re-registered only when the ID set actually changes (`models_refreshed`), so an overlay pi refreshes after module load takes effect without a process restart. Subagent instances still never re-register.
 
 - **Fix: steer/followUp replay keeps images and message boundaries** — deferred user messages are stored as content blocks and replayed through the prompt stream, so attached images survive; multiple user messages in one turn are joined with a blank line.

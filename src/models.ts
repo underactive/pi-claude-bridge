@@ -3,7 +3,7 @@
 // `fable` resolves to the first-listed Fable entry without shadowing older IDs.
 // Extracted from index.ts so tests can import without activating the extension.
 
-export const MODEL_IDS_IN_ORDER = ["claude-fable-5-1", "claude-fable-5", "claude-opus-5-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-5-5", "claude-sonnet-5", "claude-sonnet-4-6", "claude-haiku-4-5"];
+export const MODEL_IDS_IN_ORDER = ["claude-fable-5-1", "claude-fable-5", "claude-opus-5-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-5-5", "claude-sonnet-5", "claude-sonnet-4-6", "claude-haiku-5-5", "claude-haiku-4-5"];
 
 // Workaround for missing thinkingLevelMap in pi-ai (earendil-works/pi#6371).
 // Sonnet 5 and Sonnet 4.6 top out at "max" (verified via CC supportedModels).
@@ -114,6 +114,8 @@ export function resolveClaudeCodeRuntimeModel(modelId: string, settings: LongCon
 				cliModelId: settings.longContextExtraUsage ? "claude-sonnet-4-6[1m]" : "claude-sonnet-4-6",
 				contextWindow: settings.longContextExtraUsage ? ONE_M_CONTEXT : TWO_HUNDRED_K_CONTEXT,
 			};
+		case "claude-haiku-5-5":
+			return { cliModelId: "claude-haiku-5-5", contextWindow: TWO_HUNDRED_K_CONTEXT };
 		case "claude-haiku-4-5":
 			return { cliModelId: "claude-haiku-4-5", contextWindow: TWO_HUNDRED_K_CONTEXT };
 		default:
