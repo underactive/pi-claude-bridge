@@ -2,6 +2,8 @@
 
 ## UNRELEASED
 
+- **Fix: declare `typebox` as a peer dependency** — pi provides `typebox` to extensions, so it now lives in `peerDependencies` (`"*"`) instead of `dependencies`. Silences the "Host-provided extension packages must be declared in peerDependencies" warning and avoids duplicate runtime modules from installed copies.
+
 - **Add: claude-haiku-5-5 model** — Anthropic's Claude Haiku 5.5 is now selectable via `/model`, and the `haiku` shortcut resolves to it (use the explicit `claude-haiku-4-5` ID to pin Haiku 4.5). Registers at 200K and requests bare `claude-haiku-5-5` (same Haiku policy as 4.5; context not yet probed via `diag/context-size.mjs`). Metadata is filled from pi's remote-catalog overlay cache (`agentDir/models-store.json`) since pi-ai's bundled catalog doesn't carry it yet.
 
 - **Bump: Claude Agent SDK to 0.3.293** — pins Claude Code 2.1.293 so `claude-haiku-5-5` is supported by the bundled CLI (older pinned builds reject models added after their release, same as Opus 5.5 on 2.1.258).
