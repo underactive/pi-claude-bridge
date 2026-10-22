@@ -17,7 +17,7 @@ import {
 import * as piAi from "@earendil-works/pi-ai";
 import { getModels, registerApiProvider } from "@earendil-works/pi-ai/compat";
 import { buildSessionContext, compact, getAgentDir, keyHint, type CompactionEntry, type ExtensionAPI, type ExtensionUIContext } from "@earendil-works/pi-coding-agent";
-import { createSdkMcpServer, query, type EffortLevel, type SDKMessage, type SDKUserMessage, type SettingSource } from "@anthropic-ai/claude-agent-sdk";
+import { createSdkMcpServer, query, type EffortLevel, type McpSdkServerConfigWithInstance, type SDKMessage, type SDKUserMessage, type SettingSource } from "@anthropic-ai/claude-agent-sdk";
 import type { Base64ImageSource, ContentBlockParam, MessageParam } from "@anthropic-ai/sdk/resources";
 import { Type } from "typebox";
 import { Text } from "@earendil-works/pi-tui";
@@ -30,7 +30,8 @@ import { applyLongContext, buildModels, claudeCodeModelId, type LongContextSetti
 import { MCP_SERVER_NAME, MCP_TOOL_PREFIX, extractSkillsBlock } from "./skills.js";
 import { verifyWrittenSession as _verifyWrittenSession } from "./session-verify.js";
 import { extractAllToolResults as _extractAllToolResults, type McpResult } from "./extract-tool-results.js";
-import { QueryContext, ctx, emptyAssistantMessage } from "./query-state.js";
+import { QueryContext, ctx, emptyAssistantMessage, type LiveMcpServer } from "./query-state.js";
+import { replaceServerTools, toolDeclarationsKey, waitForCliTools } from "./live-mcp-tools.js";
 import { loadConfig, type Config } from "./config.js";
 import { extractAgentsAppend } from "./agents-md.js";
 import { jsonSchemaToZodShape } from "./typebox-to-zod.js";
@@ -726,6 +727,11 @@ export const __test = {
 	processAssistantMessage,
 	consumeQuery,
 	updateUsage,
+	streamClaudeAgentSdk,
+	// Replace the Agent SDK query() used by the provider path; pass nothing to restore it.
+	setQuery(fn?: typeof query) {
+		providerQuery = fn ?? query;
+	},
 };
 
 // --- Provider helpers: tool name mapping ---
@@ -811,6 +817,19 @@ function resolveMcpTools(tools: Tool[], excludeToolName?: string): {
 	return { mcpTools, customToolNameToSdk, customToolNameToPi };
 }
 
+// CLAUDE_BRIDGE_DEBUG-only: which tool names a provider call sees at each
+// boundary (pi transcript → resolveMcpTools → MCP server). Names only — never
+// arguments, prompts, or session contents.
+function debugToolBoundary(label: string, currentTools: readonly Tool[], mcpTools: readonly Tool[], customToolNameToSdk: Map<string, string>): void {
+	if (!DEBUG) return;
+	debug(`tool-diag ${label}: pi tools=[${currentTools.map((tool) => tool.name).join(",")}]`);
+	debug(`tool-diag ${label}: mcp tools=[${mcpTools.map((tool) => tool.name).join(",")}]`);
+	debug(`tool-diag ${label}: translation=[${mcpTools.map((tool) => `${tool.name}→${customToolNameToSdk.get(tool.name)}`).join(",")}]`);
+}
+
+// The provider path's query(); swapped by __test.setQuery so tests can script the SDK.
+let providerQuery: typeof query = query;
+
 // Cache for jsonSchemaToZodShape to avoid reconverting unchanged tool schemas each turn.
 const schemaZodCache = new WeakMap<object, Record<string, unknown>>();
 
@@ -820,8 +839,7 @@ const schemaZodCache = new WeakMap<object, Record<string, unknown>>();
 // emits tool_use blocks). Results are matched by ID, not position.
 // Handlers close over the captured `queryCtx`, ensuring they operate on the
 // correct query's state while multiple queries run concurrently.
-function buildMcpServers(tools: Tool[], queryCtx: QueryContext): Record<string, ReturnType<typeof createSdkMcpServer>> | undefined {
-	if (!tools.length) return undefined;
+function buildMcpServer(tools: Tool[], queryCtx: QueryContext): McpSdkServerConfigWithInstance {
 	const mcpTools = tools.map((tool) => ({
 		name: tool.name,
 		description: tool.description,
@@ -837,6 +855,11 @@ function buildMcpServers(tools: Tool[], queryCtx: QueryContext): Record<string, 
 				const result = queryCtx.pendingResults.get(toolCallId)!;
 				queryCtx.pendingResults.delete(toolCallId);
 				debug(`mcp handler: ${tool.name} [${toolCallId}] → resolved from queue (${queryCtx.pendingResults.size} remaining)`);
+				const toolSync = takeToolSyncGate(queryCtx, toolCallId);
+				if (toolSync) {
+					debug(`mcp handler: ${tool.name} [${toolCallId}] → holding result until Claude Code sees the new tools`);
+					await toolSync;
+				}
 				return result;
 			}
 			debug(`mcp handler: ${tool.name} [${toolCallId}] → waiting`);
@@ -845,8 +868,80 @@ function buildMcpServers(tools: Tool[], queryCtx: QueryContext): Record<string, 
 			});
 		},
 	}));
-	const server = createSdkMcpServer({ name: MCP_SERVER_NAME, version: "1.0.0", tools: mcpTools });
-	return { [MCP_SERVER_NAME]: server };
+	return createSdkMcpServer({ name: MCP_SERVER_NAME, version: "1.0.0", tools: mcpTools });
+}
+
+// --- Live tool-set changes ---
+//
+// A tool call can change pi's active tools (e.g. moa-fusion's enter_plan_mode
+// narrows to plan-only tools). Its result is delivered into the running query,
+// whose MCP server was built from the old set, so the change has to be pushed
+// into that server before CC makes its next model request — which it does as
+// soon as the last tool result of the turn comes back. See live-mcp-tools.ts.
+
+/** Called on each tool-result delivery with the tools pi now declares. */
+function prepareToolSync(c: QueryContext, mcpTools: Tool[], customToolNameToPi: Map<string, string>, messages: readonly Message[], results: McpResult[]): void {
+	c.toolSync = null;
+	const live = c.liveMcp;
+	if (!live) return;
+	const toolsKey = toolDeclarationsKey(mcpTools);
+	if (toolsKey === live.toolsKey) return;
+	// CC rejects a call to a tool the server doesn't serve ("Unknown tool")
+	// without invoking a handler, so its result must not hold the change back.
+	const resultToolNames = new Map<string, string>();
+	for (let i = messages.length - 1; i >= 0 && messages[i].role !== "assistant"; i--) {
+		const message = messages[i];
+		if (message.role === "toolResult") resultToolNames.set(message.toolCallId, message.toolName);
+	}
+	const resultIds = results.flatMap((result) => {
+		const toolName = result.toolCallId ? resultToolNames.get(result.toolCallId) : undefined;
+		return result.toolCallId && (toolName === undefined || live.toolNames.has(toolName)) ? [result.toolCallId] : [];
+	});
+	let applied: Promise<void> | undefined;
+	const apply = () => applied ??= applyToolSync(c, live, mcpTools, customToolNameToPi, toolsKey);
+	if (resultIds.length === 0) {
+		void apply();
+		return;
+	}
+	c.toolSync = { outstanding: new Set(resultIds), apply };
+	debug(`tool-sync: tool set changed, applying before the last of ${resultIds.length} result(s) returns`);
+}
+
+/** Mark one result as handed back to CC. For the last outstanding result of a
+ *  pending tool-set change, returns the promise the result must wait on. */
+function takeToolSyncGate(c: QueryContext, toolCallId: string): Promise<void> | undefined {
+	const sync = c.toolSync;
+	if (!sync?.outstanding.delete(toolCallId) || sync.outstanding.size > 0) return undefined;
+	c.toolSync = null;
+	return sync.apply();
+}
+
+// Never rejects: a failure leaves the old tools in place (the pre-fix behavior)
+// and releases the held tool result.
+async function applyToolSync(c: QueryContext, live: LiveMcpServer, mcpTools: Tool[], customToolNameToPi: Map<string, string>, toolsKey: string): Promise<void> {
+	try {
+		const listed = replaceServerTools(live.server, buildMcpServer(mcpTools, c));
+		if (!listed) {
+			diagDump("live_tools_unsupported", { tools: mcpTools.map((tool) => tool.name) });
+			piUI?.notify("Claude bridge could not update tools in the running Claude Code query; the new tool set applies from the next prompt.", "warning");
+			return;
+		}
+		live.toolsKey = toolsKey;
+		live.toolNames = new Set(listed);
+		for (const [sdkName, piName] of customToolNameToPi) live.customToolNameToPi.set(sdkName, piName);
+		const confirmation = await waitForCliTools(c.activeQuery as Parameters<typeof waitForCliTools>[0], MCP_SERVER_NAME, listed);
+		debug(`tool-sync: ${confirmation.status} after ${confirmation.elapsedMs}ms, mcp tools=[${listed.join(",")}]`);
+		if (confirmation.status !== "confirmed" && c.activeQuery) {
+			diagDump("live_tools_unconfirmed", {
+				status: confirmation.status,
+				elapsedMs: confirmation.elapsedMs,
+				expected: listed,
+				...(confirmation.status === "timeout" ? { seen: confirmation.seen ?? null } : { error: confirmation.error }),
+			});
+		}
+	} catch (error) {
+		diagDump("live_tools_error", { err: errorMessage(error) });
+	}
 }
 
 // --- Usage helpers ---
@@ -1273,13 +1368,23 @@ function streamClaudeAgentSdk(model: Model<any>, context: TranscriptContext, opt
 		claimCurrentPiStream(stream, "tool-result", resultCtx);
 		resultCtx.resetTurnState(model);
 		debug(`provider: tool results, ${allResults.length} results, ${resultCtx.pendingToolCalls.size} waiting handlers, ctx.msgs=${context.messages.length}`);
+		const currentTools = getCurrentTools(context.messages);
+		const { mcpTools, customToolNameToSdk, customToolNameToPi } = resolveMcpTools(currentTools, askClaudeToolName);
+		debugToolBoundary("tool-result (live query)", currentTools, mcpTools, customToolNameToSdk);
+		prepareToolSync(resultCtx, mcpTools, customToolNameToPi, context.messages, allResults);
 		for (const result of allResults) {
 			const id = result.toolCallId;
 			if (id && resultCtx.pendingToolCalls.has(id)) {
 				const pending = resultCtx.pendingToolCalls.get(id)!;
 				resultCtx.pendingToolCalls.delete(id);
 				if (DEBUG) debug(`provider: resolving ${pending.toolName} [${id}]${result.isError ? " (error)" : ""}`, JSON.stringify(result.content).slice(0, 200));
-				pending.resolve(result);
+				const toolSync = takeToolSyncGate(resultCtx, id);
+				if (toolSync) {
+					debug(`provider: holding ${pending.toolName} [${id}] until Claude Code sees the new tools`);
+					void toolSync.then(() => pending.resolve(result));
+				} else {
+					pending.resolve(result);
+				}
 			} else if (id) {
 				resultCtx.pendingResults.set(id, result);
 				debug(`provider: queued result [${id}] (${resultCtx.pendingResults.size} pending)`);
@@ -1378,7 +1483,14 @@ function streamClaudeAgentSdk(model: Model<any>, context: TranscriptContext, opt
 	const prompt: string | AsyncIterable<SDKUserMessage> = promptBlocks
 		? wrapPromptStream(promptBlocks)
 		: promptText;
-	const mcpServers = buildMcpServers(mcpTools, queryCtx);
+	const mcpServer = mcpTools.length ? buildMcpServer(mcpTools, queryCtx) : undefined;
+	const mcpServers = mcpServer ? { [MCP_SERVER_NAME]: mcpServer } : undefined;
+	queryCtx.liveMcp = mcpServer
+		? { server: mcpServer, toolsKey: toolDeclarationsKey(mcpTools), toolNames: new Set(mcpTools.map((tool) => tool.name)), customToolNameToPi }
+		: null;
+	queryCtx.toolSync = null;
+	debugToolBoundary(`fresh query (${resumeSessionId ? `resume ${resumeSessionId.slice(0, 8)}` : "new session"}${isReentrant ? ", reentrant" : ""})`, currentTools, mcpTools, customToolNameToSdk);
+	if (DEBUG) debug(`tool-diag fresh query: mcpServers=[${Object.keys(mcpServers ?? {}).join(",")}]`);
 	const appendSystemPrompt = providerSettings.appendSystemPrompt !== false;
 	const agentsAppend = appendSystemPrompt ? extractAgentsAppend(cwd) : undefined;
 	const skillsAppend = appendSystemPrompt ? extractSkillsBlock(systemPrompt) : undefined;
@@ -1450,7 +1562,7 @@ function streamClaudeAgentSdk(model: Model<any>, context: TranscriptContext, opt
 
 	// 3. Start SDK query and claim it for this context
 	let wasAborted = false;
-	const sdkQuery = query({ prompt, options: queryOptions });
+	const sdkQuery = providerQuery({ prompt, options: queryOptions });
 	queryCtx.activeQuery = sdkQuery;
 	// Each query() call has its own cumulative total_cost_usd, so the cross-check
 	// tally restarts with it. Tool-result deliveries and reentrant subagent queries
@@ -1519,7 +1631,7 @@ function streamClaudeAgentSdk(model: Model<any>, context: TranscriptContext, opt
 					}
 
 					const contOptions = { ...queryOptions, resume: resumeId, ...makeCliDebugOptions("continuation") };
-					const contQuery = query({ prompt: wrapPromptStream(steerBlocks), options: contOptions });
+					const contQuery = providerQuery({ prompt: wrapPromptStream(steerBlocks), options: contOptions });
 					queryCtx.activeQuery = contQuery;
 					queryCtx.queryCostEstimate = 0;
 
@@ -1574,6 +1686,10 @@ function streamClaudeAgentSdk(model: Model<any>, context: TranscriptContext, opt
 			if (queryCtx.activeQuery === sdkQuery) {
 				drainPendingToolCalls(queryCtx, "Query ended");
 				queryCtx.activeQuery = null;
+			}
+			if (queryCtx.liveMcp?.server === mcpServer) {
+				queryCtx.liveMcp = null;
+				queryCtx.toolSync = null;
 			}
 			activeQueryContexts.delete(queryCtx);
 			sdkQuery.close();

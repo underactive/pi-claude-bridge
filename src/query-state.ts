@@ -7,6 +7,7 @@
 //
 // Extracted from index.ts so tests can import without activating the extension.
 
+import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
 import type { ContentBlockParam } from "@anthropic-ai/sdk/resources";
 import type { AssistantMessage, AssistantMessageEventStream, Model } from "@earendil-works/pi-ai";
 import type { McpResult } from "./extract-tool-results.js";
@@ -14,6 +15,23 @@ import type { McpResult } from "./extract-tool-results.js";
 export interface PendingToolCall {
 	toolName: string;
 	resolve: (result: McpResult) => void;
+}
+
+// The MCP server the in-flight query was started with, and the pi tool set it
+// currently serves. Tool-result deliveries compare against toolsKey.
+export interface LiveMcpServer {
+	server: McpSdkServerConfigWithInstance;
+	toolsKey: string;
+	toolNames: Set<string>;
+	customToolNameToPi: Map<string, string>;
+}
+
+// A tool-set change waiting on this turn's tool results. apply() runs before
+// the last outstanding result is handed back to CC, so the next model request
+// sees the new tools while every earlier tools/call still finds its tool.
+export interface PendingToolSync {
+	outstanding: Set<string>;
+	apply: () => Promise<void>;
 }
 
 export function emptyAssistantMessage(model: Model<any>): AssistantMessage {
@@ -36,6 +54,8 @@ export class QueryContext {
 	turnToolCallIds: string[] = [];
 	nextHandlerIdx = 0;
 	deferredUserMessages: ContentBlockParam[][] = [];
+	liveMcp: LiveMcpServer | null = null;
+	toolSync: PendingToolSync | null = null;
 	// Running sum of finalized turn costs (usage.cost.total). Debug-only: compared
 	// against the SDK's own total_cost_usd in the result cross-check log.
 	queryCostEstimate = 0;
