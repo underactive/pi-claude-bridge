@@ -919,7 +919,7 @@ const REASONING_TO_EFFORT: Record<string, EffortLevel> = {
 // Prefer the model's own thinkingLevelMap when present (pi-ai 0.72+ ships
 // per-model overrides — e.g. opus-4-7 wants xhigh→xhigh, not xhigh→max).
 // Fall back to our generic table for older pi-ai or unmapped levels.
-function resolveEffort(model: Model<any>, level: string | undefined): EffortLevel | undefined {
+function resolveEffort(model: Pick<Model<any>, "thinkingLevelMap">, level: string | undefined): EffortLevel | undefined {
 	if (!level || level === "off") return undefined;
 	const levelMap: Record<string, string | null | undefined> | undefined = model.thinkingLevelMap;
 	return (levelMap?.[level] as EffortLevel | undefined) ?? REASONING_TO_EFFORT[level];
