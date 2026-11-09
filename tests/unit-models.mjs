@@ -6,7 +6,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { calculateCost } from "@earendil-works/pi-ai";
-import { MODEL_IDS_IN_ORDER, applyLongContext, buildModels, claudeCodeModelId, mergeOverlayModels, resolveClaudeCodeRuntimeModel, resolveModel } from "../src/models.js";
+import { FALLBACK_MODELS, MODEL_IDS_IN_ORDER, applyLongContext, buildModels, claudeCodeModelId, mergeOverlayModels, resolveClaudeCodeRuntimeModel, resolveModel } from "../src/models.js";
 
 const PRO = { plan: "pro", longContextExtraUsage: false };
 const MAX = { plan: "max", longContextExtraUsage: false };
@@ -179,6 +179,7 @@ describe("MODELS projection", () => {
 
 describe("Claude Code runtime model policy", () => {
 	it("uses measured Pro defaults", () => {
+		assert.deepEqual(resolveClaudeCodeRuntimeModel("claude-fable-5-2", PRO), { cliModelId: "claude-fable-5-2[1m]", contextWindow: 1000000 });
 		assert.deepEqual(resolveClaudeCodeRuntimeModel("claude-fable-5-1", PRO), { cliModelId: "claude-fable-5-1[1m]", contextWindow: 1000000 });
 		assert.deepEqual(resolveClaudeCodeRuntimeModel("claude-opus-5-5", PRO), { cliModelId: "claude-opus-5-5[1m]", contextWindow: 1000000 });
 		assert.deepEqual(resolveClaudeCodeRuntimeModel("claude-opus-5", PRO), { cliModelId: "claude-opus-5[1m]", contextWindow: 1000000 });
@@ -217,6 +218,7 @@ describe("claudeCodeModelId", () => {
 	const models = buildModels(MODEL_IDS_IN_ORDER.map(oneM));
 
 	it("returns the measured SDK request id", () => {
+		assert.equal(claudeCodeModelId(find(models, "claude-fable-5-2"), PRO), "claude-fable-5-2[1m]");
 		assert.equal(claudeCodeModelId(find(models, "claude-fable-5-1"), PRO), "claude-fable-5-1[1m]");
 		assert.equal(claudeCodeModelId(find(models, "claude-opus-5-5"), PRO), "claude-opus-5-5[1m]");
 		assert.equal(claudeCodeModelId(find(models, "claude-opus-4-8"), PRO), "claude-opus-4-8[1m]");
@@ -296,8 +298,12 @@ describe("applyLongContext", () => {
 describe("resolveModel", () => {
 	const models = buildModels(MODEL_IDS_IN_ORDER.map(mockPiAiModel));
 
-	it("fable shortcut resolves to claude-fable-5-1 (latest Fable in order)", () => {
-		assert.equal(resolveModel(models, "fable")?.id, "claude-fable-5-1");
+	it("fable shortcut resolves to claude-fable-5-2 (latest Fable in order)", () => {
+		assert.equal(resolveModel(models, "fable")?.id, "claude-fable-5-2");
+	});
+
+	it("full Fable 5.1 ID resolves exactly despite the shared prefix", () => {
+		assert.equal(resolveModel(models, "claude-fable-5-1")?.id, "claude-fable-5-1");
 	});
 
 	it("opus shortcut resolves to claude-opus-5-5 (latest Opus in order)", () => {
@@ -371,6 +377,20 @@ describe("mergeOverlayModels", () => {
 	it("ignores overlay ids that are not bridge models", () => {
 		const merged = mergeOverlayModels(staticCatalog, [mockPiAiModel("claude-opus-4-1")]);
 		assert.equal(find(merged, "claude-opus-4-1"), undefined);
+	});
+
+	it("fallback fills claude-fable-5-2 only when both catalogs lack it", () => {
+		const reported = [];
+		const filled = buildModels(mergeOverlayModels(staticCatalog, FALLBACK_MODELS), (ids) => reported.push(...ids));
+		const fable52 = find(filled, "claude-fable-5-2");
+		assert.equal(fable52.name, "Claude Fable 5.2");
+		assert.equal(fable52.contextWindow, 1000000);
+		assert.deepEqual(fable52.cost, { input: 8, output: 40, cacheRead: 0.2, cacheWrite: 10 });
+		assert.ok(!reported.includes("claude-fable-5-2"), "fallback entry must not be reported missing");
+
+		const overlayFable52 = { ...mockPiAiModel("claude-fable-5-2"), name: "OVERLAY" };
+		const withOverlay = mergeOverlayModels(mergeOverlayModels(staticCatalog, [overlayFable52]), FALLBACK_MODELS);
+		assert.equal(find(buildModels(withOverlay), "claude-fable-5-2").name, "OVERLAY");
 	});
 
 	it("never overrides a static entry with the overlay copy", () => {

@@ -3,7 +3,7 @@
 // `fable` resolves to the first-listed Fable entry without shadowing older IDs.
 // Extracted from index.ts so tests can import without activating the extension.
 
-export const MODEL_IDS_IN_ORDER = ["claude-fable-5-1", "claude-fable-5", "claude-opus-5-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-5-5", "claude-sonnet-5", "claude-sonnet-4-6", "claude-haiku-5-5", "claude-haiku-4-5"];
+export const MODEL_IDS_IN_ORDER = ["claude-fable-5-2", "claude-fable-5-1", "claude-fable-5", "claude-opus-5-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-5-5", "claude-sonnet-5", "claude-sonnet-4-6", "claude-haiku-5-5", "claude-haiku-4-5"];
 
 // Workaround for missing thinkingLevelMap in pi-ai (earendil-works/pi#6371).
 // Sonnet 5 and Sonnet 4.6 top out at "max" (verified via CC supportedModels).
@@ -66,6 +66,24 @@ export function mergeOverlayModels<T extends { id: string }>(staticModels: T[], 
 	return additions.length ? [...staticModels, ...additions] : staticModels;
 }
 
+// Last-resort catalog entries for bridge models that neither pi-ai's static
+// catalog nor pi's remote overlay carries yet, layered below both via
+// mergeOverlayModels (static > overlay > fallback). Fable 5.2 is seeded from the
+// overlay's anthropic Fable 5.1 entry with Fable 5.2 list pricing. Delete an
+// entry once the overlay publishes the model.
+export const FALLBACK_MODELS = [
+	{
+		id: "claude-fable-5-2",
+		name: "Claude Fable 5.2",
+		reasoning: true,
+		input: ["text", "image"],
+		contextWindow: 1_000_000,
+		maxTokens: 128_000,
+		thinkingLevelMap: { off: null, xhigh: "xhigh", max: "max" },
+		cost: { input: 8, output: 40, cacheRead: 0.2, cacheWrite: 10 },
+	},
+];
+
 export type LongContextSettings = {
 	plan: "pro" | "max";
 	longContextExtraUsage: boolean;
@@ -83,7 +101,8 @@ const ONE_M_CONTEXT = 1_000_000;
 // pi-ai's advertised contextWindow: bare Opus 4.7 serves 1M, bare Opus 4.8 does
 // not, and [1m] entitlement differs by model. Sonnet 5.5 was measured at 200K
 // bare and 1M with [1m]. Opus 5.5 still follows the Opus 5/4.8 [1m] policy by
-// inference pending a direct documented probe. See diag/CONTEXT-SIZE.md.
+// inference pending a direct documented probe, as does Fable 5.2 by analogy to
+// Fable 5.1. See diag/CONTEXT-SIZE.md.
 export function resolveClaudeCodeRuntimeModel(modelId: string, settings: LongContextSettings): ClaudeCodeRuntimeModel {
 	switch (modelId) {
 		case "claude-opus-5-5":
@@ -101,6 +120,8 @@ export function resolveClaudeCodeRuntimeModel(modelId: string, settings: LongCon
 				contextWindow: useOneM ? ONE_M_CONTEXT : TWO_HUNDRED_K_CONTEXT,
 			};
 		}
+		case "claude-fable-5-2":
+			return { cliModelId: "claude-fable-5-2[1m]", contextWindow: ONE_M_CONTEXT };
 		case "claude-fable-5-1":
 			return { cliModelId: "claude-fable-5-1[1m]", contextWindow: ONE_M_CONTEXT };
 		case "claude-fable-5":

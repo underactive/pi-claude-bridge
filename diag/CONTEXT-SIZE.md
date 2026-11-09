@@ -42,6 +42,8 @@ the footnote below the table).
 | `claude-opus-4-7[1m]`    | 1M               | 1M              | 1M               | 1M              |
 | `claude-opus-4-6`         | 200K             | 200K            | 200K             | 200K            |
 | `claude-opus-4-6[1m]`    | 429              | 1M              | 1M               | 1M              |
+| `claude-fable-5-2`        | —                | —               | —                | —               |
+| `claude-fable-5-2[1m]`   | —                | —               | —                | —               |
 | `claude-fable-5-1`        | —                | —               | —                | —               |
 | `claude-fable-5-1[1m]`   | —                | —               | —                | —               |
 | `claude-fable-5`          | 200K             | —               | —                | —               |
@@ -73,6 +75,8 @@ credits-on run: `claude-opus-5` bare → 200K, `claude-opus-5[1m]` → 1M (the
 registers Opus 5 at 1M (requesting `claude-opus-5[1m]`), matching Opus 4.8.
 
 ‖ **Opus 5.5 not yet probed.** The bridge requests `claude-opus-5-5[1m]` and registers 1M by analogy to Opus 5/4.8, pending a direct `diag/context-size.mjs` run.
+
+¶ **Fable 5.2 not yet probed.** The bridge requests `claude-fable-5-2[1m]` and registers 1M by analogy to Fable 5.1, pending a direct `diag/context-size.mjs` run.
 
 § **Haiku 5.5 not yet probed.** The bridge requests bare `claude-haiku-5-5` and registers 200K by analogy to Haiku 4.5, pending a direct `diag/context-size.mjs` run.
 

@@ -26,7 +26,7 @@ import { appendFileSync, mkdirSync, readFileSync, realpathSync, statSync } from 
 import { homedir } from "os";
 import { dirname, join } from "path";
 import { PROVIDER_ID, SDK_TO_PI_TOOL_NAME, messageContentToText, convertPiMessages } from "./convert.js";
-import { applyLongContext, buildModels, claudeCodeModelId, type LongContextSettings, MODEL_IDS_IN_ORDER, mergeOverlayModels, resolveModel as _resolveModel } from "./models.js";
+import { applyLongContext, buildModels, claudeCodeModelId, FALLBACK_MODELS, type LongContextSettings, MODEL_IDS_IN_ORDER, mergeOverlayModels, resolveModel as _resolveModel } from "./models.js";
 import { MCP_SERVER_NAME, MCP_TOOL_PREFIX, extractSkillsBlock } from "./skills.js";
 import { verifyWrittenSession as _verifyWrittenSession } from "./session-verify.js";
 import { extractAllToolResults as _extractAllToolResults, type McpResult } from "./extract-tool-results.js";
@@ -173,8 +173,9 @@ function reportMissingModels(ids: string[]): void {
 }
 
 function loadModels() {
-	// MODELS is buildModels(getModels("anthropic") + overlay) — projection kept in models.js.
-	return buildModels(mergeOverlayModels<any>(getModels("anthropic"), readOverlayAnthropicModels()), reportMissingModels);
+	// MODELS is buildModels(getModels("anthropic") + overlay + fallback) — projection kept in models.js.
+	const catalog = mergeOverlayModels<any>(getModels("anthropic"), readOverlayAnthropicModels());
+	return buildModels(mergeOverlayModels<any>(catalog, FALLBACK_MODELS), reportMissingModels);
 }
 
 // Mutable so a session_start can pick up an overlay pi refreshed after module load.
